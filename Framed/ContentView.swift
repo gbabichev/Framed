@@ -19,7 +19,9 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 640)
-        .navigationTitle("Framed")
+        .navigationTitle(model.projectTitle)
+        .focusedSceneValue(\.projectModel, model)
+        .background(ProjectWindowState(model: model, isEdited: model.isDirty, projectURL: model.projectURL).frame(width: 0, height: 0))
         .toolbar {
             ToolbarItemGroup {
                 Button { model.importImages(mockups: false) } label: { Label("Add screenshots", systemImage: "photo.badge.plus") }

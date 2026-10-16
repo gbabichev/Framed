@@ -3,10 +3,14 @@ import ImageIO
 import UniformTypeIdentifiers
 
 struct ImportedImage: Identifiable, Equatable {
-    let id = UUID()
+    let id: UUID
     let name: String
     let image: CGImage
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+
+    init(id: UUID, name: String, image: CGImage) {
+        self.id = id; self.name = name; self.image = image
+    }
 
     init(url: URL) throws {
         let access = url.startAccessingSecurityScopedResource()
@@ -24,6 +28,7 @@ struct ImportedImage: Identifiable, Equatable {
               ] as CFDictionary) else {
             throw FramedError.message("Could not read \(url.lastPathComponent). Use an image up to 60 megapixels and 16,000 pixels per side.")
         }
+        self.id = UUID()
         self.name = url.deletingPathExtension().lastPathComponent
         self.image = image
     }
