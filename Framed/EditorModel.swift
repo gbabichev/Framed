@@ -84,32 +84,24 @@ final class EditorModel {
         selectMockup(image.id)
     }
 
-    func startFrameImport(_ urls: [URL], applyLastFrame: Bool = true, completion: @escaping (UUID?) -> Void = { _ in }) {
-        startFrameImportSources(urls.map { .file($0) }, applyLastFrame: applyLastFrame, completion: completion)
+    func startFrameImport(_ urls: [URL], completion: @escaping (UUID?) -> Void = { _ in }) {
+        startFrameImportSources(urls.map { .file($0) }, completion: completion)
     }
 
     func saveSelectedFrameToLibraryInBackground(completion: @escaping (UUID?) -> Void = { _ in }) {
         guard let frame = selectedMockup else { return }
-        startFrameImportSources([.image(frame)], applyLastFrame: false) { [self] id in
+        startFrameImportSources([.image(frame)]) { [self] id in
             if let id { libraryIDs[frame.id] = id }
             completion(id)
         }
     }
 
-    private func startFrameImportSources(_ sources: [FrameImportSource], applyLastFrame: Bool, completion: @escaping (UUID?) -> Void) {
-        guard !sources.isEmpty, !isBusy, !frameLibrary.isImporting else { return }
+    private func startFrameImportSources(_ sources: [FrameImportSource], completion: @escaping (UUID?) -> Void) {
+        guard !sources.isEmpty, !isBusy, !frameLibrary.isImporting, !frameLibrary.isRemoving else { return }
         isBusy = true
         isPresentingFrameImport = true
         frameImportTask = Task { @MainActor [self] in
             let imported = await frameLibrary.importSources(sources)
-            if applyLastFrame, !Task.isCancelled, let frame = imported.last {
-                do {
-                    let (image, opening) = try await FrameFileWorker.prepare(frame, directory: frameLibrary.directory)
-                    try Task.checkCancellation()
-                    applyFrame(frame, image: image, opening: opening)
-                } catch is CancellationError { }
-                catch { self.error = error.localizedDescription }
-            }
             status = Task.isCancelled ? "Import stopped. Completed frames remain in the library." : "Imported \(imported.count) frame(s)."
             isBusy = false
             isPresentingFrameImport = false
@@ -297,15 +289,15 @@ final class EditorModel {
         return messages
     }
 
-    func importImages(mockups importingMockups: Bool, applyFrame: Bool = true, completion: @escaping (UUID?) -> Void = { _ in }) {
-        guard !isBusy, !frameLibrary.isImporting else { return }
+    func importImages(mockups importingMockups: Bool, completion: @escaping (UUID?) -> Void = { _ in }) {
+        guard !isBusy, !frameLibrary.isImporting, !frameLibrary.isRemoving else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = importingMockups ? [.png] : [.png, .jpeg, .heic, .tiff]
         panel.allowsMultipleSelection = true
         panel.message = importingMockups ? "Choose front-facing PNG mockups with transparent screen openings." : "Choose screenshots from a device or simulator."
         guard panel.runModal() == .OK else { return }
         if importingMockups {
-            startFrameImport(panel.urls, applyLastFrame: applyFrame, completion: completion)
+            startFrameImport(panel.urls, completion: completion)
         } else {
             load(panel.urls, asMockups: false)
         }
@@ -317,10 +309,7 @@ final class EditorModel {
             do {
                 let imported = try ImportedImage(url: url)
                 if asMockups {
-                    let frame = try frameLibrary.store(imported)
-                    guard useLibraryFrame(frame) else {
-                        throw FramedError.message(error ?? "Couldn’t use the imported frame.")
-                    }
+                    try frameLibrary.store(imported)
                 } else {
                     screenshots.append(imported)
                     selectedScreenshotID = imported.id

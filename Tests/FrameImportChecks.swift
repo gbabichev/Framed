@@ -63,11 +63,25 @@ struct FrameImportChecks {
         precondition(successes.count == 1 && mixed.error != nil && mixed.importCompleted == 2 && !mixed.isImporting,
                      "One bad file stopped the remaining imports")
         let model = EditorModel(frameLibrary: library)
-        model.startFrameImport(urls, applyLastFrame: true)
+        let emptyBaseline = model.fingerprint
+        model.startFrameImport(urls)
         precondition(model.isBusy && model.isPresentingFrameImport, "Import dialog not presented immediately")
         while model.isBusy { try await Task.sleep(for: .milliseconds(10)) }
-        precondition(!model.isPresentingFrameImport && model.selectedMockup != nil && model.opening != nil,
-                     "Last imported frame was not prepared/applied")
-        print("PASS: background import with \(heartbeats) main-actor heartbeats (max gap \(String(format: "%.3f", longestGap))s), progress, cancellation/retry, staging cleanup, partial failures, and automatic frame preparation")
+        precondition(!model.isPresentingFrameImport && model.fingerprint == emptyBaseline && !model.isDirty && model.mockups.isEmpty,
+                     "Import dirtied an empty project or automatically selected a frame")
+        let applied = await model.useLibraryFrameInBackground(library.frames[0])
+        precondition(applied && model.isDirty && model.opening != nil, "Explicit Use Frame must change the canvas")
+        precondition(model.writeProject(to: root.appendingPathComponent("Canvas.framed")))
+        let savedBaseline = model.fingerprint
+        model.startFrameImport(urls)
+        while model.isBusy { try await Task.sleep(for: .milliseconds(10)) }
+        precondition(model.fingerprint == savedBaseline && !model.isDirty, "Import dirtied a saved project")
+        model.settings.deviceScale = 0.6
+        let editedBaseline = model.fingerprint
+        model.startFrameImport(urls)
+        while model.isBusy { try await Task.sleep(for: .milliseconds(10)) }
+        precondition(model.fingerprint == editedBaseline && model.isDirty, "Import changed an edited canvas or cleared its dirty state")
+        model.releaseProjectAccess()
+        print("PASS: background import with \(heartbeats) main-actor heartbeats (max gap \(String(format: "%.3f", longestGap))s), progress, cancellation/retry, staging cleanup, partial failures, library-only imports for empty/saved/dirty projects, and explicit frame application")
     }
 }

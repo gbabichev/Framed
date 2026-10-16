@@ -31,7 +31,7 @@ struct FramePickerPreview: App {
                           let urls = try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path), includingPropertiesForKeys: nil) else { return }
                     previewModel.isShowingFrameLibrary = true
                     let frames = urls.filter { $0.pathExtension.lowercased() == "png" }
-                    previewModel.startFrameImport(Array(repeating: frames, count: 20).flatMap { $0 }, applyLastFrame: false)
+                    previewModel.startFrameImport(Array(repeating: frames, count: 20).flatMap { $0 })
                 }
         }.defaultSize(width: 820, height: 600)
     }

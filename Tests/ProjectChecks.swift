@@ -22,7 +22,10 @@ struct ProjectChecks {
         let model = EditorModel(frameLibrary: library)
         precondition(!model.isDirty, "New empty project must be clean")
         model.load([source], asMockups: false)
+        let beforeFrameImport = model.fingerprint
         model.load([source], asMockups: true)
+        precondition(model.fingerprint == beforeFrameImport, "Frame import changed project")
+        precondition(model.useLibraryFrame(library.frames[0]))
         precondition(model.isDirty, "Import must dirty project")
         model.settings.preset = ScreenshotPreset.all[6]
         model.settings.landscape = true

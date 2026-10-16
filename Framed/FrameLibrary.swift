@@ -70,6 +70,7 @@ final class FrameLibrary {
         } catch { self.error = "Couldn’t read the frame library. \(error.localizedDescription)" }
     }
 
+    private(set) var isRemoving = false
     private(set) var isImporting = false
     private(set) var importTotal = 0
     private(set) var importCompleted = 0
@@ -83,7 +84,7 @@ final class FrameLibrary {
     }
 
     func importSources(_ sources: [FrameImportSource]) async -> [SavedFrame] {
-        guard !isImporting else { return [] }
+        guard !isImporting, !isRemoving else { return [] }
         isImporting = true
         isCancellingImport = false
         importTotal = sources.count
@@ -110,7 +111,7 @@ final class FrameLibrary {
 
     @discardableResult
     func store(_ image: ImportedImage) throws -> SavedFrame {
-        guard !isImporting else { throw FramedError.message("Wait for the frame import to finish.") }
+        guard !isImporting, !isRemoving else { throw FramedError.message("Wait for the current library operation to finish.") }
         let frame = try FrameFileWorker.store(image, directory: directory, frames: frames)
         publish(frame)
         return frame
@@ -130,7 +131,7 @@ final class FrameLibrary {
     }
 
     func rename(_ frame: SavedFrame, to proposedName: String) throws {
-        guard !isImporting else { throw FramedError.message("Wait for the frame import to finish.") }
+        guard !isImporting, !isRemoving else { throw FramedError.message("Wait for the current library operation to finish.") }
         let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw FramedError.message("Enter a name for this frame.") }
         guard frames.contains(where: { $0.id == frame.id }) else { return }
@@ -140,10 +141,20 @@ final class FrameLibrary {
     }
 
     func remove(_ frame: SavedFrame) throws {
-        guard !isImporting else { throw FramedError.message("Wait for the frame import to finish.") }
+        guard !isImporting, !isRemoving else { throw FramedError.message("Wait for the current library operation to finish.") }
         // This removes only the reusable copy; each open/saved project owns its images.
         try FileManager.default.removeItem(at: folder(frame.id))
         frames.removeAll { $0.id == frame.id }
+    }
+
+    func removeFrames(_ ids: Set<UUID>) async {
+        guard !isImporting, !isRemoving, !ids.isEmpty else { return }
+        isRemoving = true
+        defer { isRemoving = false }
+        let targets = frames.filter { ids.contains($0.id) }
+        let result = await FrameFileWorker.removeFrames(targets, directory: directory)
+        frames.removeAll { result.removed.contains($0.id) }
+        if !result.failures.isEmpty { error = result.failures.joined(separator: "\n") }
     }
 
     private func folder(_ id: UUID) -> URL { directory.appendingPathComponent(id.uuidString, isDirectory: true) }
@@ -219,6 +230,19 @@ nonisolated enum FrameFileWorker {
         return frame
     }
 
+    @concurrent
+    static func removeFrames(_ frames: [SavedFrame], directory: URL) async -> FrameRemovalResult {
+        var result = FrameRemovalResult()
+        for frame in frames {
+            let folder = directory.appendingPathComponent(frame.id.uuidString, isDirectory: true)
+            do {
+                if FileManager.default.fileExists(atPath: folder.path) { try FileManager.default.removeItem(at: folder) }
+                result.removed.insert(frame.id)
+            } catch { result.failures.append("\(frame.name): \(error.localizedDescription)") }
+        }
+        return result
+    }
+
     static func image(for frame: SavedFrame, directory: URL) throws -> ImportedImage {
         let data = try Data(contentsOf: directory.appendingPathComponent(frame.id.uuidString).appendingPathComponent("frame.png"))
         guard Self.digest(data) == frame.digest else { throw FramedError.message("The stored frame ‘\(frame.name)’ is damaged. Import it again to repair it.") }
@@ -231,4 +255,9 @@ nonisolated enum FrameFileWorker {
                                                        kCGImageSourceCreateThumbnailWithTransform: true,
                                                        kCGImageSourceThumbnailMaxPixelSize: 320] as CFDictionary)
     }
+}
+
+nonisolated struct FrameRemovalResult: Sendable {
+    var removed: Set<UUID> = []
+    var failures: [String] = []
 }

@@ -33,7 +33,7 @@ See [the implementation plan](Notes/Implementation-plan.md) for the next steps: 
 This opens the real SwiftUI view at the reported launch-crash size and performs 12 resize passes. Run on a Mac with a graphical session:
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Framed/FrameLibraryBrowser.swift Framed/FrameImportProgress.swift Framed/ContentView.swift Tests/WindowLayoutChecks.swift -o /tmp/framed-window-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Framed/FrameSelection.swift Framed/FrameLibraryBrowser.swift Framed/FrameImportProgress.swift Framed/ContentView.swift Tests/WindowLayoutChecks.swift -o /tmp/framed-window-checks
 /tmp/framed-window-checks
 ```
 
@@ -67,11 +67,24 @@ These checks use an isolated temporary directory and cover persistence after del
 
 ## Background frame imports
 
-Frame imports decode images, encode PNGs, hash contents, write files, generate thumbnails, and detect the selected frame's screen opening on a background executor. A native modal progress dialog reports the filename and processed count. Cancel stops the remaining work; completed frames stay available, and unfinished staging folders are removed. A non-interruptible image operation may need to finish before cancellation completes. Adding a project-embedded frame to the library and loading a saved frame also perform their image work off the main actor.
+Frame imports decode images, encode PNGs, hash contents, write files, generate thumbnails, on a background executor. A native modal progress dialog reports the filename and processed count. Cancel stops the remaining work; completed frames stay available, and unfinished staging folders are removed. A non-interruptible image operation may need to finish before cancellation completes. Adding a project-embedded frame to the library and loading a saved frame also perform their image work off the main actor.
 
 ```sh
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FrameImportChecks.swift -o /tmp/framed-import-checks
 /tmp/framed-import-checks /path/to/device-frames
 ```
 
-The checks measure a main-actor heartbeat during real imports and exercise cancellation/retry, partial failures, staging cleanup, progress, and automatic frame preparation. Set `FRAMED_PREVIEW_IMPORT=1` with `FRAMED_PREVIEW_FRAMES` when running the visual picker fixture to inspect and cancel an import into a temporary library.
+The checks measure a main-actor heartbeat during real imports and exercise cancellation/retry, partial failures, staging cleanup, progress, library-only import semantics, and explicit frame application. Set `FRAMED_PREVIEW_IMPORT=1` with `FRAMED_PREVIEW_FRAMES` when running the visual picker fixture to inspect and cancel an import into a temporary library.
+
+## Bulk frame management
+
+Enable Select Multiple to toggle frames by clicking, or use Command-click to toggle and Shift-click to select a range. Select All Shown selects the current search results; Deselect clears the selection. Remove Selected removes the chosen reusable copies. The More (ellipsis) menu offers Remove All Frames, including frames hidden by search. Both actions ask for confirmation, run file removal off the main actor, and preserve project-embedded copies. Use Frame is available when exactly one frame (or No Frame) is selected.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/FrameSelection.swift Tests/FrameBulkChecks.swift -o /tmp/framed-bulk-checks
+/tmp/framed-bulk-checks
+```
+
+Checks cover toggle/range/filter selection, stale selections, bulk deletion, Remove All, persistence, and preservation of the current project's frame.
+
+Frame import is always a global-library operation, including the main toolbar and inspector plus button. It never adds images to the project, changes its selected frame, or changes its dirty state. Only choosing Use Frame applies a library frame to the canvas. New library entries are saved immediately in Application Support; saving a `.framed` project is not required to keep them.

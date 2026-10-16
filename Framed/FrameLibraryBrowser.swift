@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct FrameThumbnail: View {
     let image: CGImage?
@@ -19,11 +20,13 @@ struct FrameLibraryBrowser: View {
     @Bindable var library: FrameLibrary
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
-    @State private var selection: UUID?
+    @State private var selection = FrameSelection()
+    @State private var multipleSelection = false
     @State private var noFrame = false
     @State private var renameFrame: SavedFrame?
     @State private var renamedName = ""
-    @State private var removeFrame: SavedFrame?
+    @State private var pendingRemoval: Set<UUID>?
+    @State private var removingAll = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,24 +38,37 @@ struct FrameLibraryBrowser: View {
                 Spacer()
                 TextField("Search frames", text: $search).textFieldStyle(.roundedBorder).frame(width: 200)
                 Button {
-                    model.importImages(mockups: true, applyFrame: false) { id in
-                        if let id { selection = id; noFrame = false }
+                    model.importImages(mockups: true) { id in
+                        if let id { selection.selectAll([id]); noFrame = false }
                     }
                 } label: {
                     Label("Import…", systemImage: "plus")
                 }
             }.padding(20)
+            FrameManagementBar(multipleSelection: $multipleSelection, selectedCount: selection.ids.count,
+                               hasFrames: !library.frames.isEmpty, hasVisibleFrames: !filteredFrames.isEmpty,
+                               selectAll: { selection.selectAll(filteredFrames.map(\.id)); noFrame = false },
+                               clear: { selection.clear(); noFrame = false },
+                               removeSelected: { requestRemoval(selection.ids) },
+                               removeAll: { requestRemoval(Set(library.frames.map(\.id)), all: true) })
             Divider()
             HSplitView {
-                FrameGrid(frames: filteredFrames, selection: selection, noFrame: noFrame,
-                          select: { selection = $0; noFrame = $0 == nil },
+                FrameGrid(frames: filteredFrames, selection: selection.ids, noFrame: noFrame,
+                          select: selectFrame,
                           rename: { renameFrame = $0; renamedName = $0.name },
-                          remove: { removeFrame = $0 })
+                          remove: { frame in
+                              requestRemoval(selection.ids.contains(frame.id) ? selection.ids : [frame.id])
+                          })
                     .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
-                FrameDetails(frame: selectedFrame, noFrame: noFrame,
-                             rename: { renameFrame = $0; renamedName = $0.name },
-                             remove: { removeFrame = $0 })
-                    .frame(width: 230)
+                if selection.ids.count > 1 {
+                    FrameBatchDetails(count: selection.ids.count) { requestRemoval(selection.ids) }
+                        .frame(width: 230)
+                } else {
+                    FrameDetails(frame: selectedFrame, noFrame: noFrame,
+                                 rename: { renameFrame = $0; renamedName = $0.name },
+                                 remove: { requestRemoval([$0.id]) })
+                        .frame(width: 230)
+                }
             }
             Divider()
             HStack {
@@ -60,7 +76,7 @@ struct FrameLibraryBrowser: View {
                 if model.selectedMockup != nil && !model.selectedFrameIsInLibrary {
                     Button("Add Current Project Frame") {
                         model.saveSelectedFrameToLibraryInBackground { id in
-                            if let id { selection = id; noFrame = false }
+                            if let id { selection.selectAll([id]); noFrame = false }
                         }
                     }.controlSize(.small)
                 }
@@ -72,12 +88,23 @@ struct FrameLibraryBrowser: View {
             }.padding(16)
         }
         .frame(minWidth: 760, idealWidth: 820, minHeight: 540, idealHeight: 600)
-        .disabled(model.isBusy || library.isImporting)
+        .disabled(model.isBusy || library.isImporting || library.isRemoving)
+        .overlay {
+            if library.isRemoving {
+                ProgressView("Removing frames…")
+                    .padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .interactiveDismissDisabled(library.isRemoving)
         .sheet(isPresented: Binding(get: { model.isPresentingFrameImport }, set: { _ in })) {
             FrameImportProgress(model: model, library: library)
                 .environment(\.isEnabled, true)
         }
-        .onAppear { selection = model.selectedLibraryFrameID; noFrame = model.selectedMockup == nil }
+        .onAppear {
+            selection.selectAll(model.selectedLibraryFrameID.map { [$0] } ?? [])
+            noFrame = model.selectedMockup == nil
+        }
+        .onChange(of: library.frames.map(\.id)) { _, ids in selection.retain(Set(ids)) }
         .alert("Rename Frame", isPresented: Binding(get: { renameFrame != nil }, set: { if !$0 { renameFrame = nil } })) {
             TextField("Frame name", text: $renamedName)
             Button("Cancel", role: .cancel) { renameFrame = nil }
@@ -87,16 +114,18 @@ struct FrameLibraryBrowser: View {
                 renameFrame = nil
             }
         }
-        .confirmationDialog("Remove this frame from the library?", isPresented: Binding(get: { removeFrame != nil }, set: { if !$0 { removeFrame = nil } }), titleVisibility: .visible) {
-            Button("Remove Frame", role: .destructive) {
-                guard let frame = removeFrame else { return }
-                perform { try library.remove(frame) }
-                if selection == frame.id { selection = nil; noFrame = false }
-                removeFrame = nil
+        .confirmationDialog(removalTitle, isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }), titleVisibility: .visible) {
+            Button(removingAll ? "Remove All Frames" : removalButtonTitle, role: .destructive) {
+                guard let ids = pendingRemoval else { return }
+                pendingRemoval = nil
+                Task { @MainActor in
+                    await library.removeFrames(ids)
+                    selection.retain(Set(library.frames.map(\.id)))
+                }
             }
-            Button("Cancel", role: .cancel) { removeFrame = nil }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
         } message: {
-            Text("Existing projects keep their own copies. You can import the frame again later.")
+            Text(removingAll ? "This includes frames hidden by the search filter. Existing projects keep their own copies. You can import frames again later." : "Existing projects keep their own copies. You can import these frames again later.")
         }
         .alert("Frame Library", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
             Button("OK") { library.error = nil }
@@ -106,7 +135,31 @@ struct FrameLibraryBrowser: View {
     private var filteredFrames: [SavedFrame] {
         search.isEmpty ? library.frames : library.frames.filter { $0.name.localizedStandardContains(search) }
     }
-    private var selectedFrame: SavedFrame? { library.frames.first { $0.id == selection } }
+    private var selectedFrame: SavedFrame? {
+        guard selection.ids.count == 1 else { return nil }
+        return library.frames.first { selection.ids.contains($0.id) }
+    }
+    private var removalTitle: String {
+        let count = pendingRemoval?.count ?? 0
+        if removingAll { return "Remove all \(count) frames from the library?" }
+        return count == 1 ? "Remove this frame from the library?" : "Remove \(count) selected frames?"
+    }
+    private var removalButtonTitle: String {
+        let count = pendingRemoval?.count ?? 0
+        return count == 1 ? "Remove Frame" : "Remove \(count) Frames"
+    }
+    private func requestRemoval(_ ids: Set<UUID>, all: Bool = false) {
+        guard !ids.isEmpty else { return }
+        removingAll = all
+        pendingRemoval = ids
+    }
+    private func selectFrame(_ id: UUID?) {
+        guard let id else { selection.clear(); noFrame = true; return }
+        let modifiers = NSEvent.modifierFlags
+        selection.select(id, visible: filteredFrames.map(\.id),
+                         toggle: multipleSelection || modifiers.contains(.command), extend: modifiers.contains(.shift))
+        noFrame = false
+    }
     private func perform(_ operation: () throws -> Void) {
         do { try operation() } catch { library.error = error.localizedDescription }
     }
@@ -121,9 +174,54 @@ struct FrameLibraryBrowser: View {
     }
 }
 
+private struct FrameManagementBar: View {
+    @Binding var multipleSelection: Bool
+    let selectedCount: Int
+    let hasFrames: Bool
+    let hasVisibleFrames: Bool
+    let selectAll: () -> Void
+    let clear: () -> Void
+    let removeSelected: () -> Void
+    let removeAll: () -> Void
+    var body: some View {
+        HStack(spacing: 12) {
+            Toggle("Select Multiple", isOn: $multipleSelection).toggleStyle(.button)
+                .help("Toggle selection by clicking thumbnails. Command-click toggles, Shift-click selects a range.")
+            Button("Select All Shown", action: selectAll).disabled(!hasVisibleFrames)
+            if selectedCount > 0 {
+                Button("Deselect", action: clear)
+            }
+            Spacer(minLength: 0)
+            Button("Remove Selected…", role: .destructive, action: removeSelected).disabled(selectedCount == 0)
+            Menu {
+                Button("Remove All Frames…", role: .destructive, action: removeAll)
+            } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize()
+                .disabled(!hasFrames).help("More library actions")
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 20).padding(.vertical, 10)
+    }
+}
+
+private struct FrameBatchDetails: View {
+    let count: Int
+    let remove: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "rectangle.stack").font(.largeTitle).foregroundStyle(.secondary)
+            Text("\(count) frames selected").font(.headline)
+            Text("Remove them together, or select one frame to preview and use it.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button("Remove Selected…", role: .destructive, action: remove)
+            Spacer()
+        }.padding(20)
+    }
+}
+
 private struct FrameGrid: View {
     let frames: [SavedFrame]
-    let selection: UUID?
+    let selection: Set<UUID>
     let noFrame: Bool
     let select: (UUID?) -> Void
     let rename: (SavedFrame) -> Void
@@ -134,10 +232,10 @@ private struct FrameGrid: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 14)], spacing: 16) {
                 FrameTile(name: "No frame", image: nil, selected: noFrame) { select(nil) }
                 ForEach(frames) { frame in
-                    FrameTile(name: frame.name, image: frame.thumbnail, selected: selection == frame.id) { select(frame.id) }
+                    FrameTile(name: frame.name, image: frame.thumbnail, selected: selection.contains(frame.id)) { select(frame.id) }
                         .contextMenu {
                             Button("Rename…") { rename(frame) }
-                            Button("Remove from Library…", role: .destructive) { remove(frame) }
+                            Button(selection.contains(frame.id) && selection.count > 1 ? "Remove Selected Frames…" : "Remove from Library…", role: .destructive) { remove(frame) }
                         }
                 }
             }.padding(20)
