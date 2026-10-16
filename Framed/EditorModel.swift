@@ -14,13 +14,118 @@ final class EditorModel {
     var status = "Import screenshots to get started."
     var isBusy = false
     private var openings: [UUID: ScreenOpening] = [:]
+    let frameLibrary: FrameLibrary
+    private var libraryIDs: [UUID: UUID] = [:]
+    var isShowingFrameLibrary = false
+    var isPresentingFrameImport = false
+    @ObservationIgnored private var frameImportTask: Task<Void, Never>?
     private(set) var projectURL: URL?
     private var savedFingerprint: ProjectFingerprint?
     @ObservationIgnored weak var window: NSWindow?
     @ObservationIgnored private var hasProjectAccess = false
     var isPresentingProjectDialog = false
 
-    init() { savedFingerprint = fingerprint }
+    init(frameLibrary: FrameLibrary = .shared) {
+        self.frameLibrary = frameLibrary
+        savedFingerprint = fingerprint
+    }
+
+    var selectedLibraryFrameID: UUID? { selectedMockupID.flatMap { libraryIDs[$0] } }
+
+    var selectedFrameDisplayName: String? {
+        if let id = selectedLibraryFrameID, let frame = frameLibrary.frames.first(where: { $0.id == id }) { return frame.name }
+        return selectedMockup?.name
+    }
+
+    var selectedFrameIsInLibrary: Bool {
+        guard let id = selectedLibraryFrameID else { return false }
+        return frameLibrary.frames.contains { $0.id == id }
+    }
+
+    func saveSelectedFrameToLibrary() {
+        guard let frame = selectedMockup else { return }
+        do { libraryIDs[frame.id] = try frameLibrary.store(frame).id }
+        catch { frameLibrary.error = error.localizedDescription }
+    }
+
+    @discardableResult
+    func useLibraryFrame(_ frame: SavedFrame) -> Bool {
+        do {
+            if let existing = mockups.first(where: { libraryIDs[$0.id] == frame.id }) {
+                selectMockup(existing.id)
+            } else {
+                let image = try frameLibrary.image(for: frame)
+                applyFrame(frame, image: image, opening: ScreenOpening.detect(in: image.image))
+            }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
+    }
+
+    func useLibraryFrameInBackground(_ frame: SavedFrame) async -> Bool {
+        guard !isBusy else { return false }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let (image, opening) = try await FrameFileWorker.prepare(frame, directory: frameLibrary.directory)
+            try Task.checkCancellation()
+            applyFrame(frame, image: image, opening: opening)
+            return true
+        } catch { self.error = error.localizedDescription; return false }
+    }
+
+    private func applyFrame(_ frame: SavedFrame, image: ImportedImage, opening: ScreenOpening?) {
+        if let existing = mockups.first(where: { libraryIDs[$0.id] == frame.id }) {
+            selectMockup(existing.id)
+            return
+        }
+        mockups.append(image)
+        libraryIDs[image.id] = frame.id
+        if let opening { openings[image.id] = opening }
+        selectMockup(image.id)
+    }
+
+    func startFrameImport(_ urls: [URL], applyLastFrame: Bool = true, completion: @escaping (UUID?) -> Void = { _ in }) {
+        startFrameImportSources(urls.map { .file($0) }, applyLastFrame: applyLastFrame, completion: completion)
+    }
+
+    func saveSelectedFrameToLibraryInBackground(completion: @escaping (UUID?) -> Void = { _ in }) {
+        guard let frame = selectedMockup else { return }
+        startFrameImportSources([.image(frame)], applyLastFrame: false) { [self] id in
+            if let id { libraryIDs[frame.id] = id }
+            completion(id)
+        }
+    }
+
+    private func startFrameImportSources(_ sources: [FrameImportSource], applyLastFrame: Bool, completion: @escaping (UUID?) -> Void) {
+        guard !sources.isEmpty, !isBusy, !frameLibrary.isImporting else { return }
+        isBusy = true
+        isPresentingFrameImport = true
+        frameImportTask = Task { @MainActor [self] in
+            let imported = await frameLibrary.importSources(sources)
+            if applyLastFrame, !Task.isCancelled, let frame = imported.last {
+                do {
+                    let (image, opening) = try await FrameFileWorker.prepare(frame, directory: frameLibrary.directory)
+                    try Task.checkCancellation()
+                    applyFrame(frame, image: image, opening: opening)
+                } catch is CancellationError { }
+                catch { self.error = error.localizedDescription }
+            }
+            status = Task.isCancelled ? "Import stopped. Completed frames remain in the library." : "Imported \(imported.count) frame(s)."
+            isBusy = false
+            isPresentingFrameImport = false
+            frameImportTask = nil
+            if !isShowingFrameLibrary, let message = frameLibrary.error {
+                error = message
+                frameLibrary.error = nil
+            }
+            completion(imported.last?.id)
+        }
+    }
+
+    func cancelFrameImport() {
+        frameLibrary.markImportCancelling()
+        frameImportTask?.cancel()
+    }
 
     var projectTitle: String { projectURL?.deletingPathExtension().lastPathComponent ?? "Untitled" }
     var fingerprint: ProjectFingerprint {
@@ -57,6 +162,11 @@ final class EditorModel {
         adoptProjectURL(url)
         savedFingerprint = fingerprint
         status = "Opened \(url.lastPathComponent)."
+        libraryIDs = [:]
+        for frame in frames {
+            // Opening a project never resurrects a frame deliberately removed from the library.
+            libraryIDs[frame.id] = try? frameLibrary.matching(frame)?.id
+        }
     }
 
     private func adoptProjectURL(_ url: URL) {
@@ -129,6 +239,13 @@ final class EditorModel {
     }
 
     func confirmDiscardingChanges(completion: @escaping (Bool) -> Void) {
+        if isShowingFrameLibrary {
+            isShowingFrameLibrary = false
+            if let window, let sheet = window.attachedSheet {
+                window.endSheet(sheet)
+                sheet.orderOut(nil)
+            }
+        }
         guard !isBusy, !isPresentingProjectDialog else { completion(false); return }
         guard isDirty else { completion(true); return }
         let alert = NSAlert()
@@ -180,13 +297,18 @@ final class EditorModel {
         return messages
     }
 
-    func importImages(mockups importingMockups: Bool) {
+    func importImages(mockups importingMockups: Bool, applyFrame: Bool = true, completion: @escaping (UUID?) -> Void = { _ in }) {
+        guard !isBusy, !frameLibrary.isImporting else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = importingMockups ? [.png] : [.png, .jpeg, .heic, .tiff]
         panel.allowsMultipleSelection = true
         panel.message = importingMockups ? "Choose front-facing PNG mockups with transparent screen openings." : "Choose screenshots from a device or simulator."
         guard panel.runModal() == .OK else { return }
-        load(panel.urls, asMockups: importingMockups)
+        if importingMockups {
+            startFrameImport(panel.urls, applyLastFrame: applyFrame, completion: completion)
+        } else {
+            load(panel.urls, asMockups: false)
+        }
     }
 
     func load(_ urls: [URL], asMockups: Bool) {
@@ -195,9 +317,10 @@ final class EditorModel {
             do {
                 let imported = try ImportedImage(url: url)
                 if asMockups {
-                    mockups.append(imported)
-                    if let opening = ScreenOpening.detect(in: imported.image) { openings[imported.id] = opening }
-                    selectMockup(imported.id)
+                    let frame = try frameLibrary.store(imported)
+                    guard useLibraryFrame(frame) else {
+                        throw FramedError.message(error ?? "Couldn’t use the imported frame.")
+                    }
                 } else {
                     screenshots.append(imported)
                     selectedScreenshotID = imported.id
@@ -216,6 +339,7 @@ final class EditorModel {
     }
 
     func selectMockup(_ id: UUID?) {
+        guard id != selectedMockupID else { return }
         selectedMockupID = id
         settings.manualScreen = false
         if let bounds = opening?.bounds {

@@ -5,7 +5,7 @@ A native SwiftUI macOS app for placing device screenshots inside your own transp
 ## Use
 1. Open `Framed.xcodeproj` in Xcode 27.1 and run the Framed scheme.
 2. Add screenshots from your simulator or real device. Multiple images can be imported together.
-3. Import front-facing PNG mockups and choose a frame in the inspector. The largest enclosed transparent screen opening is detected automatically; camera cutouts remain visible.
+3. Open the visual Frame Library in the inspector, import front-facing PNG mockups, and choose a thumbnail. The largest enclosed transparent screen opening is detected automatically; camera cutouts remain visible.
 4. Choose an output size, background, scale, and Fit or Fill. Check the preview and any aspect-ratio or enlargement warnings.
 5. Export one screenshot or export the entire list into a new folder using the same layout.
 
@@ -33,7 +33,7 @@ See [the implementation plan](Notes/Implementation-plan.md) for the next steps: 
 This opens the real SwiftUI view at the reported launch-crash size and performs 12 resize passes. Run on a Mac with a graphical session:
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Framed/ContentView.swift Tests/WindowLayoutChecks.swift -o /tmp/framed-window-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Framed/FrameLibraryBrowser.swift Framed/FrameImportProgress.swift Framed/ContentView.swift Tests/WindowLayoutChecks.swift -o /tmp/framed-window-checks
 /tmp/framed-window-checks
 ```
 
@@ -42,10 +42,36 @@ The settings pane uses SwiftUI's native `HSplitView`. The previous `.inspector` 
 ## Project checks
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/EditorModel.swift Tests/ProjectChecks.swift -o /tmp/framed-project-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/ProjectChecks.swift -o /tmp/framed-project-checks
 /tmp/framed-project-checks
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Tests/ProjectLifecycleChecks.swift -o /tmp/framed-lifecycle-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Tests/ProjectLifecycleChecks.swift -o /tmp/framed-lifecycle-checks
 /tmp/framed-lifecycle-checks
 ```
 
 The roundtrip checks use temporary projects and remove their source images before reopening. The lifecycle checks require a graphical Mac session and operate only on disposable test windows, verifying native dirty state and close/quit decisions.
+
+## Reusable frame library
+
+Imported frames are copied into `Framed/Frames` in the app's Application Support directory (inside its container when sandboxed). Original PNGs can be moved or removed after import. Each entry contains the original-resolution PNG, a bounded thumbnail, and metadata; matching image content is imported only once.
+
+Click the frame preview in the inspector to open the visual picker. Search, inspect a larger preview, select No Frame, rename entries, or remove library copies using the details pane or contextual menu. Importing within the picker updates the shared library; Use Frame applies the choice to the canvas. Library changes do not dirty projects. Removing a library copy preserves the embedded copies in projects.
+
+For projects created before the library, select Save this frame to library in the inspector or Add Current Project Frame in the picker. Opening a project matches existing library entries but does not resurrect removed ones.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FrameLibraryChecks.swift -o /tmp/framed-library-checks
+/tmp/framed-library-checks
+```
+
+These checks use an isolated temporary directory and cover persistence after deleting the source image, bounded previews, deduplication, rename/removal, project portability and dirty-state isolation, calibration, asset repair, and import failure. `Tests/FramePickerPreview.swift` provides a separate visual QA fixture; set `FRAMED_PREVIEW_FRAMES` to a folder of PNG frames. It always copies into a temporary directory rather than the user's library.
+
+## Background frame imports
+
+Frame imports decode images, encode PNGs, hash contents, write files, generate thumbnails, and detect the selected frame's screen opening on a background executor. A native modal progress dialog reports the filename and processed count. Cancel stops the remaining work; completed frames stay available, and unfinished staging folders are removed. A non-interruptible image operation may need to finish before cancellation completes. Adding a project-embedded frame to the library and loading a saved frame also perform their image work off the main actor.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FrameImportChecks.swift -o /tmp/framed-import-checks
+/tmp/framed-import-checks /path/to/device-frames
+```
+
+The checks measure a main-actor heartbeat during real imports and exercise cancellation/retry, partial failures, staging cleanup, progress, and automatic frame preparation. Set `FRAMED_PREVIEW_IMPORT=1` with `FRAMED_PREVIEW_FRAMES` when running the visual picker fixture to inspect and cancel an import into a temporary library.

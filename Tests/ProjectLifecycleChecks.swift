@@ -116,6 +116,14 @@ struct ProjectLifecycleChecks {
         window.performClose(nil)
         await click("Cancel", on: window)
         precondition(window.isVisible && model.isDirty, "Close Cancel lost work")
+        let picker = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        model.isShowingFrameLibrary = true
+        window.beginSheet(picker, completionHandler: nil)
+        var pickerQuitAllowed = true
+        model.confirmDiscardingChanges { pickerQuitAllowed = $0 }
+        await click("Cancel", on: window)
+        precondition(window.isVisible && !model.isShowingFrameLibrary && !pickerQuitAllowed,
+                     "Frame picker blocked the unsaved-quit prompt")
         window.performClose(nil)
         await click("Save", on: window)
         await click("Cancel", on: window)

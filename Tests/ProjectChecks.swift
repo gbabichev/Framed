@@ -18,7 +18,8 @@ struct ProjectChecks {
         let image = context.makeImage()!
         let imported = ImportedImage(id: UUID(), name: "Embedded frame", image: image)
         try ProjectImage(imported).png.write(to: source)
-        let model = EditorModel()
+        let library = FrameLibrary(directory: directory.appendingPathComponent("Frames"))
+        let model = EditorModel(frameLibrary: library)
         precondition(!model.isDirty, "New empty project must be clean")
         model.load([source], asMockups: false)
         model.load([source], asMockups: true)
@@ -38,7 +39,7 @@ struct ProjectChecks {
         precondition(model.writeProject(to: path), "Project save failed")
         precondition(!model.isDirty && model.projectURL == path, "Save must establish clean baseline and URL")
         try FileManager.default.removeItem(at: source)
-        let reopened = EditorModel()
+        let reopened = EditorModel(frameLibrary: library)
         try reopened.restoreProject(FramedProject.read(from: path), at: path)
         precondition(reopened.fingerprint == expected, "Roundtrip lost project settings or image identity")
         precondition(reopened.selectedScreenshotID == selected && !reopened.isDirty, "Selection/baseline not restored")

@@ -39,6 +39,13 @@ struct ContentView: View {
             }
         }
         .disabled(model.isBusy)
+        .sheet(isPresented: $model.isShowingFrameLibrary) {
+            FrameLibraryBrowser(model: model, library: model.frameLibrary)
+        }
+        .sheet(isPresented: Binding(get: { model.isPresentingFrameImport && !model.isShowingFrameLibrary }, set: { _ in })) {
+            FrameImportProgress(model: model, library: model.frameLibrary)
+                .environment(\.isEnabled, true)
+        }
         .alert("Couldn’t complete the operation", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
@@ -243,21 +250,27 @@ private struct MockupSettings: View {
                     Image(systemName: "plus")
                 }.help("Import PNG mockups")
             }
-            Menu {
-                Button("No frame") { model.selectMockup(nil) }
-                ForEach(model.mockups) { mockup in
-                    Button(mockup.name) { model.selectMockup(mockup.id) }
-                }
-                Divider()
-                Button("Import PNG mockups…") { model.importImages(mockups: true) }
-            } label: {
-                Text(model.selectedMockup == nil ? "No frame" : "Change frame…")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Button { model.isShowingFrameLibrary = true } label: {
+                HStack(spacing: 12) {
+                    FrameThumbnail(image: model.selectedMockup?.image)
+                        .frame(width: 48, height: 64)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(model.selectedMockup == nil ? "Choose a frame…" : "Change frame…")
+                        Text("\(model.frameLibrary.frames.count) saved frames")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }.padding(6)
             }
-            .menuStyle(.borderedButton)
+            .buttonStyle(.bordered)
             if let mockup = model.selectedMockup {
-                Text(mockup.name).font(.caption).foregroundStyle(.secondary)
+                Text(model.selectedFrameDisplayName ?? mockup.name).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                if !model.selectedFrameIsInLibrary {
+                    Button("Save this frame to library") { model.saveSelectedFrameToLibraryInBackground() }
+                        .font(.caption)
+                }
                 if model.opening != nil && !model.settings.manualScreen {
                     Label("Screen detected", systemImage: "checkmark.circle")
                         .font(.caption).foregroundStyle(.secondary)

@@ -53,10 +53,14 @@ struct ProjectSettings: Codable, Equatable {
     }
 }
 
-struct ProjectImage: Codable {
+nonisolated struct ProjectImage: Codable, Sendable {
     var id: UUID
     var name: String
     var png: Data
+
+    init(id: UUID, name: String, png: Data) {
+        self.id = id; self.name = name; self.png = png
+    }
 
     init(_ imported: ImportedImage) throws {
         id = imported.id; name = imported.name

@@ -2,7 +2,7 @@ import AppKit
 import ImageIO
 import UniformTypeIdentifiers
 
-struct ImportedImage: Identifiable, Equatable {
+nonisolated struct ImportedImage: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
     let image: CGImage
@@ -34,12 +34,12 @@ struct ImportedImage: Identifiable, Equatable {
     }
 }
 
-enum FramedError: LocalizedError {
+nonisolated enum FramedError: LocalizedError {
     case message(String)
     var errorDescription: String? { switch self { case .message(let message): message } }
 }
 
-struct ScreenOpening {
+nonisolated struct ScreenOpening: Sendable {
     /// Normalized coordinates measured from the top-left of the mockup.
     let bounds: CGRect
     let mask: CGImage
