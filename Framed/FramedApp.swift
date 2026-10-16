@@ -13,5 +13,7 @@ struct FramedApp: App {
         WindowGroup {
             ContentView()
         }
+        .defaultSize(width: 1150, height: 800)
+        .windowResizability(.contentMinSize)
     }
 }
