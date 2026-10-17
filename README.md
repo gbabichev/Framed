@@ -12,7 +12,7 @@ A native SwiftUI macOS app for placing device screenshots inside your own transp
 Exports use sRGB at the selected pixel dimensions. In Appearance, enable Transparent background to export a PNG with alpha; the preview shows a checkerboard that is not included in the file. JPEG always uses the selected background color. Transparency is saved with the project. App Store uploads require an opaque background, so turn transparency off for those exports. The app uses user-selected file access and processes images locally. Use File → Save Project (⌘S), Save Project As (⇧⌘S), and Open Project (⌘O) to continue work later. The `.framed` project embeds screenshots and mockups along with the canvas settings, so it can be moved without its source images. Canvas edits show the native dirty-window indicator. Closing a dirty window or quitting offers Save, Don’t Save, and Cancel; cancelling or failing a save preserves your work. Exporting images does not save the project.
 
 ## Mockup requirements
-The screen and exterior background should be transparent. Use manual screen bounds if automatic detection needs correction. An opaque screen placeholder must be removed in an image editor first. Perspective/angled device transformations are not supported. Start with a frame that matches the screenshot's device and orientation; Fit preserves the screenshot with letterboxing, while Fill may crop.
+The screen and exterior background should be transparent. Automatic screen detection is recommended. If it needs correction, expand Screen calibration and enable Adjust screen edges manually. The preview shows a blue outline (excluded from exports). Left/right edges are measured across the frame image; top/bottom edges are measured down it. Edges keep the opposite edge fixed and cannot cross. Manual mode starts from the detected screen; Reset to Detected Screen returns to automatic detection and its camera-cutout mask. Manual calibration uses a rounded rectangle instead of that mask. Fit may leave black bars when the screen and screenshot proportions differ; Fill crops to cover the screen. An opaque screen placeholder must be removed in an image editor first. Perspective/angled device transformations are not supported. Start with a frame that matches the screenshot's device and orientation; Fit preserves the screenshot with letterboxing, while Fill may crop.
 
 The local catalog contains common accepted sizes for iPhone, iPhone Duo, iPad, Mac, Apple TV, Vision Pro, and Apple Watch. It is dated October 16, 2026, and links to [Apple's screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications). It does not enumerate every legacy size or guarantee App Review acceptance. Apple allows up to 10 screenshots per device size; select the required sets for the platforms your app supports.
 
@@ -104,3 +104,21 @@ Checks approximate screen measurements, portrait and landscape, devices with mul
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/TransparencyChecks.swift -o /tmp/framed-transparency-checks
 /tmp/framed-transparency-checks
 ```
+
+## Calibration checks
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/CalibrationChecks.swift -o /tmp/framed-calibration-checks
+/tmp/framed-calibration-checks
+```
+
+Checks independent edges, bounds and minimum sizes, saved settings, detected starting geometry, reset to automatic, and dirty state.
+
+## Export edge checks
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Tests/MaskEdgeChecks.swift -o /tmp/framed-mask-checks
+/tmp/framed-mask-checks
+```
+
+Detection uses a bounded analysis image, while clipping is refined from source alpha up to 4,096 pixels per side. Clipping extends beneath the opaque bezel so the source PNG supplies antialiased corners and camera cutouts. The pixel checks use a large synthetic frame to catch coarse-mask stair-stepping.

@@ -39,8 +39,8 @@ struct ProjectSettings: Codable, Equatable {
     func restored() throws -> CompositionSettings {
         guard ScreenshotPreset.all.contains(preset),
               (0.4...1).contains(deviceScale), [red, green, blue].allSatisfy({ (0...1).contains($0) }),
-              (0...0.8).contains(screenX), (0...0.8).contains(screenY),
-              (0.1...1).contains(screenWidth), (0.1...1).contains(screenHeight),
+              (0...0.9).contains(screenX), (0...0.9).contains(screenY),
+              (0.099999...1).contains(screenWidth), (0.099999...1).contains(screenHeight),
               (0...0.25).contains(cornerRadius) else {
             throw FramedError.message("This project contains unsupported canvas settings.")
         }

@@ -86,6 +86,11 @@ nonisolated struct ScreenOpening: Sendable {
             minY = min(minY, p / w); maxY = max(maxY, p / w)
             mask[p] = 255
         }
+        // Detection stays bounded for predictable import cost. Export clipping is refined
+        // from source alpha; enlarging the thresholded detection grid causes stair-stepping.
+        let seed = largest[largest.count / 2]
+        let nativeMask = refinedMask(in: image, seed: CGPoint(x: (Double(seed % w) + 0.5) / Double(w),
+                                                              y: (Double(seed / w) + 0.5) / Double(h)))
         guard let provider = CGDataProvider(data: Data(mask) as CFData),
               let maskImage = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8,
                                       bytesPerRow: w, space: CGColorSpaceCreateDeviceGray(),
@@ -93,7 +98,66 @@ nonisolated struct ScreenOpening: Sendable {
                                       shouldInterpolate: true, intent: .defaultIntent) else { return nil }
         return Self(bounds: CGRect(x: Double(minX) / Double(w), y: Double(minY) / Double(h),
                                    width: Double(maxX - minX + 1) / Double(w), height: Double(maxY - minY + 1) / Double(h)),
-                    mask: maskImage)
+                    mask: nativeMask ?? maskImage)
+    }
+
+    private static func refinedMask(in image: CGImage, seed: CGPoint) -> CGImage? {
+        // This exceeds the longest supported export side while bounding very large imports.
+        let scale = min(1, 4096 / Double(max(image.width, image.height)))
+        let width = max(1, Int(Double(image.width) * scale))
+        let height = max(1, Int(Double(image.height) * scale))
+        var alpha = [UInt8](repeating: 0, count: width * height)
+        let drawn = alpha.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(),
+                                          bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return false }
+            context.interpolationQuality = .high
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+        let seedX = min(width - 1, max(0, Int(seed.x * Double(width))))
+        let seedY = min(height - 1, max(0, Int(seed.y * Double(height))))
+        guard alpha[seedY * width + seedX] < 16 else { return nil }
+
+        func flood(threshold: UInt8) -> [UInt8]? {
+            var remaining = alpha
+            var mask = [UInt8](repeating: 0, count: width * height)
+            var seeds = [seedY * width + seedX]
+            // Scanline flood fill avoids a queue containing every screen pixel.
+            while let point = seeds.popLast() {
+                guard remaining[point] < threshold else { continue }
+                let y = point / width
+                var left = point % width
+                while left > 0 && remaining[y * width + left - 1] < threshold { left -= 1 }
+                var right = point % width
+                while right < width - 1 && remaining[y * width + right + 1] < threshold { right += 1 }
+                guard left > 0, right < width - 1, y > 0, y < height - 1 else { return nil }
+                var aboveRun = false, belowRun = false
+                for x in left...right {
+                    let index = y * width + x
+                    remaining[index] = 255
+                    let above = remaining[index - width] < threshold
+                    let below = remaining[index + width] < threshold
+                    if above && !aboveRun { seeds.append(index - width) }
+                    if below && !belowRun { seeds.append(index + width) }
+                    aboveRun = above; belowRun = below
+                }
+                // Tuck clipping one pixel beneath the opaque bezel. The original PNG's
+                // antialiased alpha supplies the visible edge, including camera cutouts.
+                for row in (y - 1)...(y + 1) {
+                    for x in (left - 1)...(right + 1) { mask[row * width + x] = 255 }
+                }
+            }
+            return mask
+        }
+        // Some translucent artwork has no opaque barrier. Fall back to the same
+        // enclosed region threshold as detection, still at the refined resolution.
+        guard let mask = flood(threshold: 254) ?? flood(threshold: 16),
+              let provider = CGDataProvider(data: Data(mask) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 8,
+                       bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: [],
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 }
 
@@ -114,6 +178,33 @@ struct CompositionSettings {
     var manualBounds: CGRect {
         CGRect(x: screenX, y: screenY, width: min(screenWidth, 1 - screenX), height: min(screenHeight, 1 - screenY))
     }
+    // Edges move independently while preserving the opposite edge and a usable screen area.
+    // These projections keep the stored rectangle equal to what the controls display.
+    var screenLeft: Double {
+        get { manualBounds.minX }
+        set { setScreenEdges(left: min(max(0, newValue), screenRight - 0.1), top: screenTop,
+                             right: screenRight, bottom: screenBottom) }
+    }
+    var screenRight: Double {
+        get { manualBounds.maxX }
+        set { setScreenEdges(left: screenLeft, top: screenTop,
+                             right: max(screenLeft + 0.1, min(1, newValue)), bottom: screenBottom) }
+    }
+    var screenTop: Double {
+        get { manualBounds.minY }
+        set { setScreenEdges(left: screenLeft, top: min(max(0, newValue), screenBottom - 0.1),
+                             right: screenRight, bottom: screenBottom) }
+    }
+    var screenBottom: Double {
+        get { manualBounds.maxY }
+        set { setScreenEdges(left: screenLeft, top: screenTop, right: screenRight,
+                             bottom: max(screenTop + 0.1, min(1, newValue))) }
+    }
+    private mutating func setScreenEdges(left: Double, top: Double, right: Double, bottom: Double) {
+        screenX = left; screenY = top
+        screenWidth = right - left; screenHeight = bottom - top
+    }
+
 }
 
 enum CompositionRenderer {

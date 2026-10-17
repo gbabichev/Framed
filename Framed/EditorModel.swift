@@ -334,6 +334,25 @@ final class EditorModel {
         if !failures.isEmpty { error = failures.joined(separator: "\n") }
     }
 
+    var manualCalibrationEnabled: Bool {
+        get { settings.manualScreen }
+        set {
+            if newValue && !settings.manualScreen { copyDetectedScreenBounds() }
+            settings.manualScreen = newValue
+        }
+    }
+
+    func resetScreenCalibration() {
+        copyDetectedScreenBounds()
+        settings.manualScreen = false
+    }
+
+    private func copyDetectedScreenBounds() {
+        guard let bounds = opening?.bounds else { return }
+        settings.screenX = bounds.minX; settings.screenY = bounds.minY
+        settings.screenWidth = bounds.width; settings.screenHeight = bounds.height
+    }
+
     func selectMockup(_ id: UUID?) {
         guard id != selectedMockupID else { return }
         selectedMockupID = id

@@ -172,6 +172,9 @@ private struct CompositionPreview: View {
             ZStack {
                 if settings.transparentBackground && !forceOpaque { TransparencyGrid() }
                 Image(decorative: image, scale: 1).resizable()
+                if settings.manualScreen, let mockup {
+                    ScreenCalibrationOutline(mockup: mockup, settings: settings)
+                }
             }
                 .aspectRatio(CGFloat(image.width) / CGFloat(image.height), contentMode: .fit)
                 .shadow(color: .black.opacity(0.15), radius: 16, y: 8)
@@ -179,6 +182,29 @@ private struct CompositionPreview: View {
         } else {
             ContentUnavailableView("Set the screen area", systemImage: "viewfinder", description: Text("This mockup needs manual screen bounds. Enable Manual screen area in the inspector."))
         }
+    }
+}
+
+private struct ScreenCalibrationOutline: View {
+    let mockup: CGImage
+    let settings: CompositionSettings
+
+    var body: some View {
+        GeometryReader { geometry in
+            let device = CompositionRenderer.deviceRect(image: mockup, canvas: geometry.size,
+                                                         scale: settings.deviceScale)
+            let bounds = settings.manualBounds
+            let width = device.width * bounds.width
+            let height = device.height * bounds.height
+            RoundedRectangle(cornerRadius: min(width, height) * settings.cornerRadius)
+                .strokeBorder(.blue, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: min(width, height) * settings.cornerRadius))
+                .frame(width: width, height: height)
+                .position(x: device.minX + bounds.midX * device.width,
+                          y: device.minY + bounds.midY * device.height)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -331,24 +357,45 @@ private struct MockupSettings: View {
                     Label("Screen detected", systemImage: "checkmark.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                DisclosureGroup("Screen calibration") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Adjust manually", isOn: $model.settings.manualScreen)
-                        if model.settings.manualScreen {
-                            ValueSlider(title: "Left", value: $model.settings.screenX, range: 0...0.8)
-                            ValueSlider(title: "Top", value: $model.settings.screenY, range: 0...0.8)
-                            ValueSlider(title: "Width", value: $model.settings.screenWidth, range: 0.1...1)
-                            ValueSlider(title: "Height", value: $model.settings.screenHeight, range: 0.1...1)
-                            ValueSlider(title: "Corners", value: $model.settings.cornerRadius, range: 0...0.25)
-                        }
-                    }.padding(.top, 8)
-                }.font(.caption)
+                ScreenCalibrationSettings(model: model)
             } else {
                 Text("Import a front-facing PNG with a transparent screen.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+private struct ScreenCalibrationSettings: View {
+    @Bindable var model: EditorModel
+
+    var body: some View {
+        DisclosureGroup("Screen calibration") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Automatic detection is recommended.")
+                    .foregroundStyle(.secondary)
+                Toggle("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled)
+                if model.settings.manualScreen {
+                    if model.opening != nil {
+                        Button("Reset to Detected Screen") { model.resetScreenCalibration() }
+                    }
+                    Text("Adjust the blue outline to match the screen opening. Edges are percentages of the frame image.")
+                        .foregroundStyle(.secondary)
+                    ValueSlider(title: "Left edge", value: $model.settings.screenLeft,
+                                range: 0...max(0.001, model.settings.screenRight - 0.1))
+                    ValueSlider(title: "Right edge", value: $model.settings.screenRight,
+                                range: min(0.999, model.settings.screenLeft + 0.1)...1)
+                    ValueSlider(title: "Top edge", value: $model.settings.screenTop,
+                                range: 0...max(0.001, model.settings.screenBottom - 0.1))
+                    ValueSlider(title: "Bottom edge", value: $model.settings.screenBottom,
+                                range: min(0.999, model.settings.screenTop + 0.1)...1)
+                    ValueSlider(title: "Corner rounding", value: $model.settings.cornerRadius, range: 0...0.25)
+                    Text("Manual calibration uses rounded corners. Automatic detection also preserves camera cutouts.")
+                        .foregroundStyle(.secondary)
+                }
+            }.padding(.top, 8)
+        }.font(.caption)
     }
 }
 
@@ -365,6 +412,10 @@ private struct LayoutSettings: View {
                 Text("Fill").tag(true)
             }.pickerStyle(.segmented)
             .help("Fit keeps the whole screenshot. Fill crops to cover the screen.")
+            Text(settings.fillScreen ? "Fill covers the screen, cropping the screenshot if needed."
+                 : "Fit shows the whole screenshot. Different proportions leave black bars inside the device.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
