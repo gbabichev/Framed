@@ -109,7 +109,7 @@ private struct ScreenshotRow: View {
 }
 
 private struct PreviewPane: View {
-    let model: EditorModel
+    @Bindable var model: EditorModel
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -121,7 +121,7 @@ private struct PreviewPane: View {
             GeometryReader { geometry in
                 if let shot = model.selectedScreenshot {
                     CompositionPreview(screenshot: shot.image, mockup: model.selectedMockup?.image, opening: model.opening,
-                                       settings: model.settings, forceOpaque: model.jpeg)
+                                       settings: $model.settings, forceOpaque: model.jpeg)
                         .frame(width: max(1, geometry.size.width - 72), height: max(1, geometry.size.height - 48))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -164,7 +164,7 @@ private struct CompositionPreview: View {
     let screenshot: CGImage
     let mockup: CGImage?
     let opening: ScreenOpening?
-    let settings: CompositionSettings
+    @Binding var settings: CompositionSettings
     let forceOpaque: Bool
     var body: some View {
         if let image = try? CompositionRenderer.render(screenshot: screenshot, mockup: mockup, opening: opening,
@@ -175,12 +175,46 @@ private struct CompositionPreview: View {
                 if settings.manualScreen, let mockup {
                     ScreenCalibrationOutline(mockup: mockup, settings: settings)
                 }
+                if settings.headline.enabled {
+                    HeadlineDragOverlay(headline: $settings.headline)
+                }
             }
                 .aspectRatio(CGFloat(image.width) / CGFloat(image.height), contentMode: .fit)
                 .shadow(color: .black.opacity(0.15), radius: 16, y: 8)
                 .accessibilityLabel("Composed screenshot preview")
         } else {
             ContentUnavailableView("Set the screen area", systemImage: "viewfinder", description: Text("This mockup needs manual screen bounds. Enable Manual screen area in the inspector."))
+        }
+    }
+}
+
+private struct HeadlineDragOverlay: View {
+    @Binding var headline: HeadlineSettings
+    @State private var dragOrigin: CGPoint?
+    @State private var hovering = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            if let layout = HeadlineRenderer.layout(headline, canvas: geometry.size) {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(.blue.opacity(hovering || dragOrigin != nil ? 0.9 : 0.25),
+                                  style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .contentShape(Rectangle())
+                    .frame(width: layout.rect.width + 12, height: layout.rect.height + 12)
+                    .position(x: layout.rect.midX, y: layout.rect.midY)
+                    .onHover { hovering = $0 }
+                    .gesture(DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            if dragOrigin == nil { dragOrigin = CGPoint(x: layout.rect.midX, y: layout.rect.midY) }
+                            guard let origin = dragOrigin else { return }
+                            let halfWidth = layout.rect.width / 2, halfHeight = layout.rect.height / 2
+                            headline.x = min(geometry.size.width - halfWidth, max(halfWidth, origin.x + value.translation.width)) / geometry.size.width
+                            headline.y = min(geometry.size.height - halfHeight, max(halfHeight, origin.y + value.translation.height)) / geometry.size.height
+                        }
+                        .onEnded { _ in dragOrigin = nil })
+                    .help("Drag to move the headline")
+                    .accessibilityLabel("Move headline; position controls are also available in the inspector")
+            }
         }
     }
 }
@@ -239,6 +273,8 @@ private struct InspectorPane: View {
                     LayoutSettings(settings: $model.settings)
                     Divider()
                     EffectsSettings(effects: $model.settings.effects)
+                    Divider()
+                    HeadlineSettingsView(settings: $model.settings)
                     if !model.warnings.isEmpty {
                         ForEach(model.warnings, id: \.self) { warning in
                             Label(warning, systemImage: "exclamationmark.triangle")
@@ -454,6 +490,59 @@ private struct EffectsSettings: View {
                 Text("Fades the screenshot and frame together into the background, or into transparency for transparent PNGs.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private extension HeadlineSettings {
+    var pickerColor: Color {
+        get { Color(nsColor: color) }
+        set { color = NSColor(newValue) }
+    }
+}
+
+private enum HeadlineFontCatalog {
+    static let families = NSFontManager.shared.availableFontFamilies.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+}
+
+private struct HeadlineSettingsView: View {
+    @Binding var settings: CompositionSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Headline").font(.headline)
+            Toggle("Show headline", isOn: $settings.headline.enabled)
+            if settings.headline.enabled {
+                TextField("First line", text: $settings.headline.firstLineInput)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Second line (optional)", text: $settings.headline.secondLineInput)
+                    .textFieldStyle(.roundedBorder)
+                Picker("Font", selection: $settings.headline.fontFamily) {
+                    Text("System").tag("")
+                    ForEach(HeadlineFontCatalog.families, id: \.self) { Text($0).tag($0) }
+                }
+                Picker("Weight", selection: $settings.headline.weight) {
+                    ForEach(HeadlineWeight.allCases) { Text($0.title).tag($0) }
+                }
+                HStack {
+                    Text("Size (pixels)")
+                    Spacer()
+                    TextField("Font size", value: $settings.headlineFontSize, format: .number.precision(.fractionLength(0)))
+                        .frame(width: 55).textFieldStyle(.roundedBorder)
+                    Stepper("Font size", value: $settings.headlineFontSize,
+                            in: settings.outputSize.width * 0.01...settings.outputSize.width * 0.15, step: 1)
+                        .labelsHidden()
+                }
+                ColorPicker("Text color", selection: $settings.headline.pickerColor, supportsOpacity: false)
+                Text("Drag the headline in the preview, or adjust its position below. Reduce device scale to make room above the frame.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ValueSlider(title: "Horizontal position", value: $settings.headline.x, range: 0...1)
+                ValueSlider(title: "Vertical position", value: $settings.headline.y, range: 0...1)
+                Button("Reset Position") {
+                    settings.headline.x = 0.5; settings.headline.y = 0.055
+                }
             }
         }
     }

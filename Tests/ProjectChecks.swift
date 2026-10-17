@@ -43,6 +43,14 @@ struct ProjectChecks {
         model.settings.effects.deviceFade = true
         model.settings.effects.fadeEdge = .top
         model.settings.effects.fadeDepth = 0.27
+        model.settings.headline.enabled = true
+        model.settings.headline.firstLine = "Saved headline"
+        model.settings.headline.secondLine = "Second line"
+        model.settings.headline.fontFamily = "Helvetica"
+        model.settings.headline.weight = .medium
+        model.settings.headline.x = 0.38; model.settings.headline.y = 0.22
+        model.settings.headline.size = 0.07
+        model.settings.headline.color = .blue
         model.jpeg = true
         let expected = model.fingerprint
         let selected = model.selectedScreenshotID
@@ -67,6 +75,10 @@ struct ProjectChecks {
         precondition(reopened.isDirty, "Effect changes must dirty project")
         reopened.settings.effects.cornerGlow = true
         precondition(!reopened.isDirty, "Restoring saved effects must clear dirty state")
+        reopened.settings.headline.x = 0.6
+        precondition(reopened.isDirty, "Moving headline must dirty project")
+        reopened.settings.headline.x = 0.38
+        precondition(!reopened.isDirty, "Restoring saved headline position must clear dirty state")
         reopened.status = "Transient status"; reopened.error = "Transient error"
         precondition(!reopened.isDirty, "Status/error must not dirty project")
         reopened.selectedScreenshotID = nil

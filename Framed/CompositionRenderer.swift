@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import UniformTypeIdentifiers
+import CoreText
 
 nonisolated struct ImportedImage: Identifiable, Equatable, Sendable {
     let id: UUID
@@ -210,6 +211,114 @@ struct CompositionEffects: Codable, Equatable {
     }
 }
 
+enum HeadlineWeight: String, Codable, CaseIterable, Identifiable {
+    case regular, medium, semibold, bold
+    var id: Self { self }
+    var title: String { rawValue.capitalized }
+    var value: NSFont.Weight {
+        switch self {
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        }
+    }
+}
+
+struct HeadlineSettings: Codable, Equatable {
+    var enabled = false
+    var firstLine = "Your headline"
+    var secondLine = ""
+    var fontFamily = ""
+    var weight = HeadlineWeight.bold
+    // Font size and center scale with the canvas, preserving layout across export sizes.
+    var size = 0.05
+    var red = 0.08, green = 0.08, blue = 0.10
+    var x = 0.5, y = 0.055
+
+    var color: NSColor {
+        get { NSColor(srgbRed: red, green: green, blue: blue, alpha: 1) }
+        set {
+            guard let color = newValue.usingColorSpace(.sRGB) else { return }
+            red = min(1, max(0, color.redComponent)); green = min(1, max(0, color.greenComponent)); blue = min(1, max(0, color.blueComponent))
+        }
+    }
+    var firstLineInput: String {
+        get { firstLine }
+        set { firstLine = Self.singleLine(newValue) }
+    }
+    var secondLineInput: String {
+        get { secondLine }
+        set { secondLine = Self.singleLine(newValue) }
+    }
+    private static func singleLine(_ value: String) -> String {
+        String(value.components(separatedBy: .newlines).joined(separator: " ").prefix(200))
+    }
+    var isValid: Bool {
+        [red, green, blue, x, y].allSatisfy { (0...1).contains($0) }
+            && (0.01...0.15).contains(size) && firstLine.count <= 200 && secondLine.count <= 200
+            && !firstLine.contains(where: { $0.isNewline }) && !secondLine.contains(where: { $0.isNewline })
+            && fontFamily.count <= 200
+    }
+}
+
+struct HeadlineLayout {
+    let rect: CGRect // Top-left canvas coordinates, shared by rendering and drag hit testing.
+    let lines: [CTLine]
+    let widths: [CGFloat]
+    let ascent: CGFloat
+    let lineHeight: CGFloat
+}
+
+enum HeadlineRenderer {
+    static func layout(_ headline: HeadlineSettings, canvas: CGSize) -> HeadlineLayout? {
+        guard headline.enabled else { return nil }
+        let text = [headline.firstLine, headline.secondLine].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !text.isEmpty else { return nil }
+        let fontSize = canvas.width * headline.size
+        let descriptor = NSFontDescriptor(fontAttributes: [
+            .family: headline.fontFamily,
+            .traits: [NSFontDescriptor.TraitKey.weight: headline.weight.value.rawValue]
+        ])
+        let font = headline.fontFamily.isEmpty ? NSFont.systemFont(ofSize: fontSize, weight: headline.weight.value)
+            : NSFont(descriptor: descriptor, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize, weight: headline.weight.value)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: headline.color]
+        let token = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: attributes))
+        let maxWidth = canvas.width * 0.9
+        let lines = text.map { value -> CTLine in
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: value, attributes: attributes))
+            return CTLineGetTypographicBounds(line, nil, nil, nil) > maxWidth
+                ? CTLineCreateTruncatedLine(line, maxWidth, .end, token) ?? line : line
+        }
+        let widths = lines.map { CGFloat(CTLineGetTypographicBounds($0, nil, nil, nil)) }
+        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+        for line in lines {
+            var a: CGFloat = 0, d: CGFloat = 0, l: CGFloat = 0
+            CTLineGetTypographicBounds(line, &a, &d, &l)
+            ascent = max(ascent, a); descent = max(descent, d); leading = max(leading, l)
+        }
+        let lineHeight = (ascent + descent + leading) * 1.1
+        let width = min(canvas.width, max(fontSize, widths.max() ?? fontSize))
+        let height = min(canvas.height, ascent + descent + CGFloat(lines.count - 1) * lineHeight)
+        let centerX = min(canvas.width - width / 2, max(width / 2, headline.x * canvas.width))
+        let centerY = min(canvas.height - height / 2, max(height / 2, headline.y * canvas.height))
+        return HeadlineLayout(rect: CGRect(x: centerX - width / 2, y: centerY - height / 2, width: width, height: height),
+                              lines: lines, widths: widths, ascent: ascent, lineHeight: lineHeight)
+    }
+
+    static func draw(_ headline: HeadlineSettings, canvas: CGSize, context: CGContext) {
+        guard let layout = layout(headline, canvas: canvas) else { return }
+        context.saveGState()
+        context.textMatrix = .identity
+        for (index, line) in layout.lines.enumerated() {
+            context.textPosition = CGPoint(x: layout.rect.midX - layout.widths[index] / 2,
+                                           y: canvas.height - layout.rect.minY - layout.ascent - CGFloat(index) * layout.lineHeight)
+            CTLineDraw(line, context)
+        }
+        context.restoreGState()
+    }
+}
+
 struct CompositionSettings {
     var preset = ScreenshotPreset.all[0]
     var landscape = false
@@ -217,6 +326,7 @@ struct CompositionSettings {
     var background = NSColor(srgbRed: 0.92, green: 0.94, blue: 0.98, alpha: 1)
     var transparentBackground = false
     var effects = CompositionEffects()
+    var headline = HeadlineSettings()
     var fillScreen = false
     var manualScreen = false
     var screenX = 0.05
@@ -224,6 +334,10 @@ struct CompositionSettings {
     var screenWidth = 0.90
     var screenHeight = 0.90
     var cornerRadius = 0.06
+    var headlineFontSize: Double {
+        get { headline.size * outputSize.width }
+        set { headline.size = min(0.15, max(0.01, newValue / outputSize.width)) }
+    }
     var outputSize: CGSize { preset.size(landscape: landscape) }
     var manualBounds: CGRect {
         CGRect(x: screenX, y: screenY, width: min(screenWidth, 1 - screenX), height: min(screenHeight, 1 - screenY))
@@ -313,6 +427,7 @@ enum CompositionRenderer {
             try drawForeground(screenshot: screenshot, mockup: mockup, opening: opening,
                                settings: settings, size: size, context: context)
         }
+        HeadlineRenderer.draw(settings.headline, canvas: size, context: context)
         guard let result = context.makeImage() else { throw FramedError.message("Could not render the composition.") }
         return result
     }

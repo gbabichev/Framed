@@ -131,3 +131,14 @@ The inspector’s Effects section offers Corner glow (color, corner, strength an
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/EffectsChecks.swift -o /tmp/framed-effects-checks
 /tmp/framed-effects-checks
 ```
+
+## Headlines
+
+Enable Show headline in the inspector to add up to two centered lines. Each field supplies one line; long lines use an ellipsis instead of adding more lines. Choose any installed font family, weight, size in export pixels, and color. Drag the headline in the preview or use the horizontal/vertical position sliders; Reset Position restores its starting location. The selection outline is a preview guide and is excluded from exports. Reduce device scale if you need more room above the frame. Text is rendered above device effects and remains sharp rather than fading with the device.
+
+Headline size and position scale proportionally when you change the canvas dimensions. All headline settings save with the project and participate in dirty-window tracking. Fonts are referenced by family rather than embedded; unavailable fonts fall back to the system font. Older projects open with headlines disabled. Batch export uses the current headline for every screenshot.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/HeadlineChecks.swift -o /tmp/framed-headline-checks
+/tmp/framed-headline-checks
+```
