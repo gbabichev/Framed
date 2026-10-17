@@ -4,6 +4,28 @@ import ImageIO
 import Observation
 import UniformTypeIdentifiers
 
+nonisolated enum FrameDeviceFamily: String, Codable, CaseIterable, Identifiable, Sendable {
+    case watch, iPhone, iPad, mac
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .watch: "Watch"
+        case .iPhone: "iPhone"
+        case .iPad: "iPad"
+        case .mac: "Mac"
+        }
+    }
+    static func detect(in name: String) -> Self? {
+        let words = name.lowercased().split { !$0.isLetter && !$0.isNumber }
+        guard let first = words.first else { return nil }
+        if first == "watch" || first == "aw" || (first == "apple" && words.dropFirst().first == "watch") { return .watch }
+        if first == "iphone" { return .iPhone }
+        if first == "ipad" { return .iPad }
+        if ["mac", "macbook", "imac"].contains(first) { return .mac }
+        return nil
+    }
+}
+
 nonisolated struct SavedFrame: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
@@ -11,9 +33,22 @@ nonisolated struct SavedFrame: Identifiable, Equatable, Sendable {
     let height: Int
     let digest: String
     let thumbnail: CGImage
+    let family: FrameDeviceFamily?
+
+    init(id: UUID, name: String, width: Int, height: Int, digest: String, thumbnail: CGImage,
+         family: FrameDeviceFamily? = nil) {
+        self.id = id; self.name = name; self.width = width; self.height = height
+        self.digest = digest; self.thumbnail = thumbnail
+        self.family = family ?? FrameDeviceFamily.detect(in: name)
+    }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id && lhs.name == rhs.name && lhs.digest == rhs.digest
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.digest == rhs.digest && lhs.family == rhs.family
+    }
+
+    static func filtered(_ frames: [Self], family: FrameDeviceFamily?, search: String) -> [Self] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return frames.filter { (family == nil || $0.family == family) && (query.isEmpty || $0.name.localizedStandardContains(query)) }
     }
 }
 
@@ -87,7 +122,7 @@ final class FrameLibrary {
                         ?? CGImageSourceCreateWithURL(folder.appendingPathComponent("frame.png") as CFURL, nil)
                     guard let source, let thumbnail = FrameFileWorker.thumbnail(source) else { throw FramedError.message("Invalid frame preview.") }
                     loaded.append(SavedFrame(id: metadata.id, name: metadata.name, width: metadata.width,
-                                             height: metadata.height, digest: metadata.digest, thumbnail: thumbnail))
+                                             height: metadata.height, digest: metadata.digest, thumbnail: thumbnail, family: metadata.family))
                 } catch { failures += 1 }
             }
             frames = sorted(loaded)
@@ -211,9 +246,9 @@ final class FrameLibrary {
         let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw FramedError.message("Enter a name for this frame.") }
         guard frames.contains(where: { $0.id == frame.id }) else { return }
-        let metadata = FrameMetadata(id: frame.id, name: name, width: frame.width, height: frame.height, digest: frame.digest)
+        let metadata = FrameMetadata(id: frame.id, name: name, width: frame.width, height: frame.height, digest: frame.digest, family: frame.family)
         try JSONEncoder().encode(metadata).write(to: folder(frame.id).appendingPathComponent("metadata.json"), options: .atomic)
-        frames = sorted(frames.map { $0.id == frame.id ? SavedFrame(id: frame.id, name: name, width: frame.width, height: frame.height, digest: frame.digest, thumbnail: frame.thumbnail) : $0 })
+        frames = sorted(frames.map { $0.id == frame.id ? SavedFrame(id: frame.id, name: name, width: frame.width, height: frame.height, digest: frame.digest, thumbnail: frame.thumbnail, family: frame.family) : $0 })
     }
 
     func remove(_ frame: SavedFrame) throws {
@@ -248,6 +283,7 @@ nonisolated struct FrameMetadata: Codable, Sendable {
     var width: Int
     var height: Int
     var digest: String
+    var family: FrameDeviceFamily? = nil
 }
 
 /// File and image work is independent of the observable, main-actor library.
@@ -292,7 +328,8 @@ nonisolated enum FrameFileWorker {
             return existing
         }
         let id = frames.contains(where: { $0.id == image.id }) ? UUID() : image.id
-        let metadata = FrameMetadata(id: id, name: image.name, width: image.image.width, height: image.image.height, digest: digest)
+        let metadata = FrameMetadata(id: id, name: image.name, width: image.image.width, height: image.image.height,
+                                     digest: digest, family: FrameDeviceFamily.detect(in: image.name))
         guard let source = CGImageSourceCreateWithData(data as CFData, nil), let thumbnail = Self.thumbnail(source) else {
             throw FramedError.message("Couldn’t create a preview for \(image.name).")
         }

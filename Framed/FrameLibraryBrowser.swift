@@ -20,6 +20,7 @@ struct FrameLibraryBrowser: View {
     @Bindable var library: FrameLibrary
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
+    @State private var familyFilter: FrameDeviceFamily?
     @State private var selection = FrameSelection()
     @State private var multipleSelection = false
     @State private var noFrame = false
@@ -41,12 +42,23 @@ struct FrameLibraryBrowser: View {
                 TextField("Search frames", text: $search).textFieldStyle(.roundedBorder).frame(width: 200)
                 Button {
                     model.importImages(mockups: true) { id in
-                        if let id { selection.selectAll([id]); noFrame = false }
+                        if let id { revealImportedFrame(id) }
                     }
                 } label: {
                     Label("Import…", systemImage: "plus")
                 }
             }.padding(20)
+            Picker("Device family", selection: $familyFilter) {
+                Text("All").tag(FrameDeviceFamily?.none)
+                ForEach(FrameDeviceFamily.allCases) { family in
+                    Text(family.title).tag(Optional(family))
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 420)
+            .padding(.horizontal, 20).padding(.bottom, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             FrameManagementBar(multipleSelection: $multipleSelection, selectedCount: selection.ids.count,
                                hasFrames: !library.frames.isEmpty, hasVisibleFrames: !filteredFrames.isEmpty,
                                selectAll: { selection.selectAll(filteredFrames.map(\.id)); noFrame = false },
@@ -55,7 +67,7 @@ struct FrameLibraryBrowser: View {
                                removeAll: { requestRemoval(Set(library.frames.map(\.id)), all: true) })
             Divider()
             HSplitView {
-                FrameGrid(frames: filteredFrames, selection: selection.ids, noFrame: noFrame,
+                FrameGrid(frames: filteredFrames, hasLibraryFrames: !library.frames.isEmpty, selection: selection.ids, noFrame: noFrame,
                           select: selectFrame,
                           rename: { renameFrame = $0; renamedName = $0.name },
                           remove: { frame in
@@ -74,11 +86,12 @@ struct FrameLibraryBrowser: View {
             }
             Divider()
             HStack {
-                Text("\(library.frames.count) frames").font(.caption).foregroundStyle(.secondary)
+                Text(familyFilter != nil || !search.isEmpty ? "\(filteredFrames.count) of \(library.frames.count) frames" : "\(library.frames.count) frames")
+                    .font(.caption).foregroundStyle(.secondary)
                 if model.selectedMockup != nil && !model.selectedFrameIsInLibrary {
                     Button("Add Current Project Frame") {
                         model.saveSelectedFrameToLibraryInBackground { id in
-                            if let id { selection.selectAll([id]); noFrame = false }
+                            if let id { revealImportedFrame(id) }
                         }
                     }.controlSize(.small)
                 }
@@ -114,7 +127,7 @@ struct FrameLibraryBrowser: View {
             selection.selectAll(model.selectedLibraryFrameID.map { [$0] } ?? [])
             noFrame = model.selectedMockup == nil
         }
-        .onChange(of: library.frames.map(\.id)) { _, ids in selection.retain(Set(ids)) }
+        .onChange(of: filteredFrames.map(\.id)) { _, ids in selection.retain(Set(ids)) }
         .task(id: selectedFrame) {
             guard let frame = selectedFrame else { preparationToken = nil; return }
             let token = UUID()
@@ -146,7 +159,7 @@ struct FrameLibraryBrowser: View {
             }
             Button("Cancel", role: .cancel) { pendingRemoval = nil }
         } message: {
-            Text(removingAll ? "This includes frames hidden by the search filter. Existing projects keep their own copies. You can import frames again later." : "Existing projects keep their own copies. You can import these frames again later.")
+            Text(removingAll ? "This includes frames hidden by device or search filters. Existing projects keep their own copies. You can import frames again later." : "Existing projects keep their own copies. You can import these frames again later.")
         }
         .alert("Frame Library", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
             Button("OK") { library.error = nil }
@@ -154,11 +167,15 @@ struct FrameLibraryBrowser: View {
     }
 
     private var filteredFrames: [SavedFrame] {
-        search.isEmpty ? library.frames : library.frames.filter { $0.name.localizedStandardContains(search) }
+        SavedFrame.filtered(library.frames, family: familyFilter, search: search)
     }
     private var selectedFrame: SavedFrame? {
         guard selection.ids.count == 1 else { return nil }
-        return library.frames.first { selection.ids.contains($0.id) }
+        return filteredFrames.first { selection.ids.contains($0.id) }
+    }
+    private func revealImportedFrame(_ id: UUID) {
+        familyFilter = nil; search = ""
+        selection.selectAll([id]); noFrame = false
     }
     private var removalTitle: String {
         let count = pendingRemoval?.count ?? 0
@@ -245,6 +262,7 @@ private struct FrameBatchDetails: View {
 
 private struct FrameGrid: View {
     let frames: [SavedFrame]
+    let hasLibraryFrames: Bool
     let selection: Set<UUID>
     let noFrame: Bool
     let select: (UUID?) -> Void
@@ -264,7 +282,7 @@ private struct FrameGrid: View {
                 }
             }.padding(20)
             if frames.isEmpty {
-                Text("Import PNG device frames to build your reusable library.")
+                Text(hasLibraryFrames ? "No matching frames. Try another device or search." : "Import PNG device frames to build your reusable library.")
                     .font(.callout).foregroundStyle(.secondary).padding(20)
             }
         }.background(.primary.opacity(0.025))

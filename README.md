@@ -214,3 +214,14 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 ```
 
 Checks cover shared preparation and masks, cached reuse across windows, prompt cancellation, retries after failure, renaming, removal, undo, dirty-state isolation, and reusing an embedded frame when its library PNG is unavailable. All file mutations happen in a disposable library copy.
+
+## Device-family filters
+
+Frame Library offers native All, Watch, iPhone, iPad, and Mac filters alongside search. Search applies within the chosen family, and Select All Shown uses the matching results. Hidden frames are removed from the selection when filters change. Importing or adding a project frame clears the filters to reveal the imported selection.
+
+Families are detected from Apple bezel filenames, including `Apple Watch …`, `AW Ultra …`, `iPhone …`, `iPad …`, `MacBook …`, `iMac …`, and `Mac …`. The imported family is kept when a frame is renamed. Existing library entries infer their family from their current names. Other names, including Apple TV, stay available under All. Filtering does not edit projects or enter undo history.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/FrameSelection.swift Tests/FrameFilterChecks.swift -o /tmp/framed-filter-checks
+/tmp/framed-filter-checks /path/to/apple-bezel-pngs
+```
