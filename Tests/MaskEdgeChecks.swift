@@ -49,6 +49,29 @@ struct MaskEdgeChecks {
             }
         }
         precondition(samples > 100, "Expected curved edge and camera antialias samples")
+        // A full desktop capture must meet the frame all the way to its edges,
+        // even when a reduced 1200px detection grid cannot represent the opening.
+        let macContext = context(4000, 2600)
+        macContext.setFillColor(CGColor(gray: 0.2, alpha: 1))
+        macContext.fill(CGRect(x: 0, y: 0, width: 4000, height: 2600))
+        macContext.clear(CGRect(x: 123, y: 147, width: 3456, height: 2234))
+        let macFrame = macContext.makeImage()!
+        let macOpening = ScreenOpening.detect(in: macFrame)!
+        precondition(abs(macOpening.bounds.width * 4000 - 3456) < 1,
+                     "Screen placement must use refined bounds instead of the coarse detection grid")
+        let desktopContext = context(3456, 2234)
+        desktopContext.setFillColor(CGColor(gray: 1, alpha: 1))
+        desktopContext.fill(CGRect(x: 0, y: 0, width: 3456, height: 2234))
+        settings.preset = ScreenshotPreset(name: "Mac seam test", width: 4000, height: 2600)
+        settings.fillScreen = false
+        let macOutput = try CompositionRenderer.render(screenshot: desktopContext.makeImage()!, mockup: macFrame,
+                                                        opening: macOpening, settings: settings)
+        let bitmap = NSBitmapImageRep(cgImage: macOutput)
+        for point in [CGPoint(x: 124, y: 220), CGPoint(x: 3577, y: 220),
+                      CGPoint(x: 124, y: 2451), CGPoint(x: 3577, y: 2451)] {
+            precondition(bitmap.colorAt(x: Int(point.x), y: Int(point.y))!.redComponent > 0.98,
+                         "Matching full desktop capture left an uncovered screen edge at \(point)")
+        }
         print("PASS: source-resolution mask and \(samples) antialiased corner/camera pixels without hard clipping seams")
     }
 }

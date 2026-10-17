@@ -92,9 +92,10 @@ nonisolated struct ScreenOpening: Sendable {
         // Detection stays bounded for predictable import cost. Export clipping is refined
         // from source alpha; enlarging the thresholded detection grid causes stair-stepping.
         let seed = largest[largest.count / 2]
-        let nativeMask = refinedMask(in: image, seed: CGPoint(x: (Double(seed % w) + 0.5) / Double(w),
-                                                              y: (Double(seed / w) + 0.5) / Double(h)))
+        let refined = refinedOpening(in: image, seed: CGPoint(x: (Double(seed % w) + 0.5) / Double(w),
+                                                               y: (Double(seed / w) + 0.5) / Double(h)))
         guard !Task.isCancelled else { return nil }
+        if let refined { return refined }
         guard let provider = CGDataProvider(data: Data(mask) as CFData),
               let maskImage = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8,
                                       bytesPerRow: w, space: CGColorSpaceCreateDeviceGray(),
@@ -102,10 +103,10 @@ nonisolated struct ScreenOpening: Sendable {
                                       shouldInterpolate: true, intent: .defaultIntent) else { return nil }
         return Self(bounds: CGRect(x: Double(minX) / Double(w), y: Double(minY) / Double(h),
                                    width: Double(maxX - minX + 1) / Double(w), height: Double(maxY - minY + 1) / Double(h)),
-                    mask: nativeMask ?? maskImage)
+                    mask: maskImage)
     }
 
-    private static func refinedMask(in image: CGImage, seed: CGPoint) -> CGImage? {
+    private static func refinedOpening(in image: CGImage, seed: CGPoint) -> Self? {
         // This exceeds the longest supported export side while bounding very large imports.
         let scale = min(1, 4096 / Double(max(image.width, image.height)))
         let width = max(1, Int(Double(image.width) * scale))
@@ -124,10 +125,11 @@ nonisolated struct ScreenOpening: Sendable {
         let seedY = min(height - 1, max(0, Int(seed.y * Double(height))))
         guard alpha[seedY * width + seedX] < 16 else { return nil }
 
-        func flood(threshold: UInt8) -> [UInt8]? {
+        func flood(threshold: UInt8) -> (pixels: [UInt8], bounds: CGRect)? {
             var remaining = alpha
             var mask = [UInt8](repeating: 0, count: width * height)
             var seeds = [seedY * width + seedX]
+            var minX = width, minY = height, maxX = 0, maxY = 0
             // Scanline flood fill avoids a queue containing every screen pixel.
             while let point = seeds.popLast() {
                 guard !Task.isCancelled else { return nil }
@@ -138,6 +140,8 @@ nonisolated struct ScreenOpening: Sendable {
                 var right = point % width
                 while right < width - 1 && remaining[y * width + right + 1] < threshold { right += 1 }
                 guard left > 0, right < width - 1, y > 0, y < height - 1 else { return nil }
+                minX = min(minX, left); maxX = max(maxX, right)
+                minY = min(minY, y); maxY = max(maxY, y)
                 var aboveRun = false, belowRun = false
                 for x in left...right {
                     let index = y * width + x
@@ -154,15 +158,18 @@ nonisolated struct ScreenOpening: Sendable {
                     for x in (left - 1)...(right + 1) { mask[row * width + x] = 255 }
                 }
             }
-            return mask
+            return (mask, CGRect(x: Double(minX) / Double(width), y: Double(minY) / Double(height),
+                                 width: Double(maxX - minX + 1) / Double(width),
+                                 height: Double(maxY - minY + 1) / Double(height)))
         }
         // Some translucent artwork has no opaque barrier. Fall back to the same
         // enclosed region threshold as detection, still at the refined resolution.
-        guard let mask = flood(threshold: 254) ?? flood(threshold: 16),
-              let provider = CGDataProvider(data: Data(mask) as CFData) else { return nil }
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 8,
-                       bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: [],
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        guard let region = flood(threshold: 254) ?? flood(threshold: 16),
+              let provider = CGDataProvider(data: Data(region.pixels) as CFData),
+              let mask = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 8,
+                                 bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: [],
+                                 provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { return nil }
+        return Self(bounds: region.bounds, mask: mask)
     }
 }
 
@@ -566,8 +573,18 @@ enum CompositionRenderer {
                 drawDesktop(screenshot: screenshot, in: screen, settings: settings.desktop, context: context)
             } else {
                 context.setFillColor(CGColor(gray: 0, alpha: 1))
-                context.fill(screen)
-                draw(screenshot, in: screen, fill: settings.fillScreen, context: context)
+                context.fill(device)
+                // The refined mask extends one detection pixel beneath the bezel so
+                // its source alpha supplies the visible antialiasing. Cover that same
+                // margin with image content rather than leaving a dark clipping seam.
+                let placement: CGRect
+                if !settings.manualScreen, let opening {
+                    placement = screen.insetBy(dx: -device.width / Double(opening.mask.width),
+                                               dy: -device.height / Double(opening.mask.height))
+                } else {
+                    placement = screen
+                }
+                draw(screenshot, in: placement, fill: settings.fillScreen, context: context)
             }
             context.restoreGState()
             context.draw(mockup, in: device)
