@@ -126,6 +126,14 @@ final class FramedAppDelegate: NSObject, NSApplicationDelegate {
 struct ProjectCommands: Commands {
     @FocusedValue(\.projectModel) private var model
     var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") { model?.undo() }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(model?.canUndo != true)
+            Button("Redo") { model?.redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(model?.canRedo != true)
+        }
         CommandGroup(after: .newItem) {
             Button("Open Project…") {
                 if let model { model.openProject() }

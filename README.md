@@ -190,3 +190,14 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 ```
 
 The checks measure main-actor responsiveness during opening and verify cancellation, layout preservation, library matching, concurrent-open rejection, source-file preservation, and atomic failure for corrupt JSON and embedded images. They use an isolated temporary frame library.
+
+## Undo and redo
+
+Use Edit → Undo (⌘Z) and Redo (⇧⌘Z) for the last 20 project edits. Device/headline drags and slider adjustments each count as one step; rapid headline typing and color adjustments are coalesced. Screenshot imports, duplication, removal, reordering, frame selection, calibration, and style application are included. Image data is shared in memory rather than re-encoded for history. Global frame-library operations and guide preferences are excluded.
+
+Saving preserves history. Undoing back to the saved composition clears the dirty indicator; undoing past it marks the project as changed. Opening a project starts a fresh history. History belongs to each window and is not stored in the project file.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/UndoChecks.swift -o /tmp/framed-undo-checks
+/tmp/framed-undo-checks
+```

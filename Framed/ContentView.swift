@@ -33,6 +33,7 @@ struct ContentView: View {
         .frame(minWidth: 900, minHeight: 640)
         .navigationTitle(model.projectTitle)
         .focusedSceneValue(\.projectModel, model)
+        .environment(model)
         .background(ProjectWindowState(model: model, isEdited: model.isDirty, projectURL: model.projectURL).frame(width: 0, height: 0))
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
@@ -350,6 +351,7 @@ private struct CompositionPreview: View {
 }
 
 private struct DeviceDragOverlay: View {
+    @Environment(EditorModel.self) private var editor
     @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
     let screenshot: CGImage
     let mockup: CGImage?
@@ -370,22 +372,27 @@ private struct DeviceDragOverlay: View {
                 .onHover { hovering = $0 }
                 .gesture(DragGesture(minimumDistance: 1)
                     .onChanged { value in
-                        if dragOrigin == nil { dragOrigin = CGPoint(x: settings.deviceX, y: settings.deviceY) }
+                        if dragOrigin == nil {
+                            editor.beginEditing("Move Device")
+                            dragOrigin = CGPoint(x: settings.deviceX, y: settings.deviceY)
+                        }
                         guard let origin = dragOrigin else { return }
                         let candidate = CGPoint(x: min(1, max(0, origin.x + value.translation.width / geometry.size.width)),
                                                 y: min(1, max(0, origin.y + value.translation.height / geometry.size.height)))
                         let snapped = CenterSnapping.position(candidate, canvas: geometry.size, enabled: snapToCenter)
                         settings.deviceX = snapped.x; settings.deviceY = snapped.y
                     }
-                    .onEnded { _ in dragOrigin = nil })
+                    .onEnded { _ in dragOrigin = nil; editor.endEditing() })
                 .help("Drag to move the device and screenshot together")
                 .accessibilityLabel("Device position; use the position controls in Appearance for precise placement")
         }
         .clipped()
+        .onDisappear { if dragOrigin != nil { dragOrigin = nil; editor.endEditing() } }
     }
 }
 
 private struct HeadlineDragOverlay: View {
+    @Environment(EditorModel.self) private var editor
     @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
     @Binding var headline: HeadlineSettings
     @State private var dragOrigin: CGPoint?
@@ -403,7 +410,10 @@ private struct HeadlineDragOverlay: View {
                     .onHover { hovering = $0 }
                     .gesture(DragGesture(minimumDistance: 1)
                         .onChanged { value in
-                            if dragOrigin == nil { dragOrigin = CGPoint(x: layout.rect.midX, y: layout.rect.midY) }
+                            if dragOrigin == nil {
+                                editor.beginEditing("Move Headline")
+                                dragOrigin = CGPoint(x: layout.rect.midX, y: layout.rect.midY)
+                            }
                             guard let origin = dragOrigin else { return }
                             let halfWidth = layout.rect.width / 2, halfHeight = layout.rect.height / 2
                             let candidate = CGPoint(x: min(geometry.size.width - halfWidth, max(halfWidth, origin.x + value.translation.width)) / geometry.size.width,
@@ -411,11 +421,12 @@ private struct HeadlineDragOverlay: View {
                             let snapped = CenterSnapping.position(candidate, canvas: geometry.size, enabled: snapToCenter)
                             headline.x = snapped.x; headline.y = snapped.y
                         }
-                        .onEnded { _ in dragOrigin = nil })
+                        .onEnded { _ in dragOrigin = nil; editor.endEditing() })
                     .help("Drag to move the headline")
                     .accessibilityLabel("Move headline; position controls are also available in the inspector")
             }
         }
+        .onDisappear { if dragOrigin != nil { dragOrigin = nil; editor.endEditing() } }
     }
 }
 
@@ -603,6 +614,7 @@ private struct OutputSettings: View {
 }
 
 private struct CanvasSuggestion: View {
+    @Environment(EditorModel.self) private var editor
     @Binding var settings: CompositionSettings
     let suggestion: ScreenshotPreset.Suggestion
 
@@ -618,6 +630,8 @@ private struct CanvasSuggestion: View {
                 Text("\(Int(suggestion.size.width)) × \(Int(suggestion.size.height)) pixels")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Use Suggested Canvas") {
+                    editor.beginEditing("Change Canvas")
+                    defer { editor.endEditing() }
                     settings.preset = suggestion.preset
                     settings.landscape = suggestion.landscape
                 }
@@ -794,6 +808,7 @@ private enum HeadlineFontCatalog {
 }
 
 private struct HeadlineSettingsView: View {
+    @Environment(EditorModel.self) private var editor
     @Binding var settings: CompositionSettings
 
     var body: some View {
@@ -827,6 +842,8 @@ private struct HeadlineSettingsView: View {
                 ValueSlider(title: "Horizontal position", value: $settings.headline.x, range: 0...1)
                 ValueSlider(title: "Vertical position", value: $settings.headline.y, range: 0...1)
                 Button("Reset Position") {
+                    editor.beginEditing("Reset Headline Position")
+                    defer { editor.endEditing() }
                     settings.headline.x = 0.5; settings.headline.y = 0.055
                 }
             }
@@ -835,6 +852,7 @@ private struct HeadlineSettingsView: View {
 }
 
 private struct ValueSlider: View {
+    @Environment(EditorModel.self) private var editor
     let title: LocalizedStringKey
     @Binding var value: Double
     let range: ClosedRange<Double>
@@ -846,7 +864,9 @@ private struct ValueSlider: View {
                 Text(value, format: .percent.precision(.fractionLength(1)))
                     .foregroundStyle(.secondary).monospacedDigit()
             }.font(.caption)
-            Slider(value: $value, in: range).accessibilityLabel(Text(title))
+            Slider(value: $value, in: range, onEditingChanged: { editing in
+                if editing { editor.beginEditing("Adjust Layout") } else { editor.endEditing() }
+            }).accessibilityLabel(Text(title))
         }
     }
 }

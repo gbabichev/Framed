@@ -6,15 +6,23 @@ import UniformTypeIdentifiers
 final class EditorModel {
     var screenshots: [ImportedImage] = []
     var mockups: [ImportedImage] = []
-    var selectedScreenshotID: UUID?
+    var selectedScreenshotID: UUID? { didSet { if oldValue != selectedScreenshotID { lastCoalescingKey = nil } } }
     private var layouts: [UUID: ScreenshotLayout] = [:]
     private var emptySettings = CompositionSettings()
     private var emptyMockupID: UUID?
-    private var copiedStyle: ScreenshotLayout?
+    private struct CopiedStyle {
+        let layout: ScreenshotLayout
+        let frame: ImportedImage?
+        let opening: ScreenOpening?
+        let libraryID: UUID?
+    }
+    private var copiedStyle: CopiedStyle?
     private var effectiveScreenshotID: UUID? { selectedScreenshotID ?? screenshots.first?.id }
     var settings: CompositionSettings {
         get { effectiveScreenshotID.map { layout(for: $0).settings } ?? emptySettings }
         set {
+            guard ProjectSettings(settings) != ProjectSettings(newValue) else { return }
+            recordEdit("Edit Layout", coalescing: settingsCoalescingKey(from: settings, to: newValue))
             if let id = effectiveScreenshotID {
                 var layout = layout(for: id); layout.settings = newValue; layouts[id] = layout
             } else { emptySettings = newValue }
@@ -23,6 +31,8 @@ final class EditorModel {
     var selectedMockupID: UUID? {
         get { effectiveScreenshotID.map { layout(for: $0).mockupID } ?? emptyMockupID }
         set {
+            guard selectedMockupID != newValue else { return }
+            recordEdit("Change Frame")
             if let id = effectiveScreenshotID {
                 var layout = layout(for: id); layout.mockupID = newValue; layouts[id] = layout
             } else { emptyMockupID = newValue }
@@ -40,7 +50,7 @@ final class EditorModel {
             return ProjectScreenshotLayout(screenshotID: shot.id, mockupID: layout.mockupID, settings: ProjectSettings(layout.settings))
         }
     }
-    var jpeg = false
+    var jpeg = false { willSet { if newValue != jpeg { recordEdit("Change Export Format") } } }
     var error: String?
     var status = "Import screenshots to get started."
     var isBusy = false
@@ -63,6 +73,8 @@ final class EditorModel {
 
     init(frameLibrary: FrameLibrary = .shared) {
         self.frameLibrary = frameLibrary
+        history.levelsOfUndo = 20
+        history.groupsByEvent = false
         savedFingerprint = fingerprint
     }
 
@@ -110,6 +122,8 @@ final class EditorModel {
     }
 
     private func applyFrame(_ frame: SavedFrame, image: ImportedImage, opening: ScreenOpening?) {
+        beginEditing("Change Frame")
+        defer { endEditing() }
         if let existing = mockups.first(where: { libraryIDs[$0.id] == frame.id }) {
             selectMockup(existing.id)
             return
@@ -155,6 +169,124 @@ final class EditorModel {
         frameImportTask?.cancel()
     }
 
+    // Snapshots retain immutable CGImages by reference; no PNG encoding or disk work.
+    private struct EditSnapshot {
+        let screenshots: [ImportedImage]
+        let mockups: [ImportedImage]
+        let layouts: [UUID: ScreenshotLayout]
+        let emptySettings: CompositionSettings
+        let emptyMockupID: UUID?
+        let selectedScreenshotID: UUID?
+        let jpeg: Bool
+        let openings: [UUID: ScreenOpening]
+        let libraryIDs: [UUID: UUID]
+        let fingerprint: ProjectFingerprint
+    }
+    @ObservationIgnored private let history = UndoManager()
+    @ObservationIgnored private var isRestoringHistory = false
+    @ObservationIgnored private var editDepth = 0
+    @ObservationIgnored private var editStart: EditSnapshot?
+    @ObservationIgnored private var editName = "Edit Layout"
+    @ObservationIgnored private var lastCoalescingKey: String?
+    @ObservationIgnored private var lastEditTime: TimeInterval = 0
+    private var historyRevision = 0
+
+    var canUndo: Bool {
+        _ = historyRevision
+        return !isBusy && !isPresentingProjectDialog && !isShowingFrameLibrary
+            && (history.canUndo || editStart.map { $0.fingerprint != fingerprint } == true)
+    }
+    var canRedo: Bool {
+        _ = historyRevision
+        return !isBusy && !isPresentingProjectDialog && !isShowingFrameLibrary && history.canRedo
+    }
+
+    private func editSnapshot() -> EditSnapshot {
+        EditSnapshot(screenshots: screenshots, mockups: mockups, layouts: layouts,
+                     emptySettings: emptySettings, emptyMockupID: emptyMockupID,
+                     selectedScreenshotID: selectedScreenshotID, jpeg: jpeg,
+                     openings: openings, libraryIDs: libraryIDs, fingerprint: fingerprint)
+    }
+
+    func beginEditing(_ name: String = "Edit Layout") {
+        guard !isRestoringHistory else { return }
+        if editDepth == 0 { editStart = editSnapshot(); editName = name; lastCoalescingKey = nil }
+        editDepth += 1
+    }
+
+    func endEditing() {
+        guard !isRestoringHistory, editDepth > 0 else { return }
+        editDepth -= 1
+        guard editDepth == 0, let before = editStart else { return }
+        editStart = nil
+        if before.fingerprint != fingerprint { registerEdit(before, name: editName) }
+    }
+
+    private func finishEditing() {
+        if editDepth > 0 { editDepth = 1; endEditing() }
+    }
+
+    private func recordEdit(_ name: String, coalescing key: String? = nil) {
+        guard !isRestoringHistory, editDepth == 0 else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if key == nil || key != lastCoalescingKey || now - lastEditTime > 0.6 {
+            registerEdit(editSnapshot(), name: name)
+        }
+        lastCoalescingKey = key; lastEditTime = now
+    }
+
+    private func registerEdit(_ before: EditSnapshot, name: String) {
+        let replaying = history.isUndoing || history.isRedoing
+        if !replaying { history.beginUndoGrouping() }
+        history.registerUndo(withTarget: self) { target in target.restoreEdit(before, name: name) }
+        history.setActionName(name)
+        if !replaying { history.endUndoGrouping() }
+        historyRevision += 1
+    }
+
+    private func restoreEdit(_ snapshot: EditSnapshot, name: String) {
+        registerEdit(editSnapshot(), name: name)
+        isRestoringHistory = true
+        defer { isRestoringHistory = false }
+        screenshots = snapshot.screenshots; mockups = snapshot.mockups; layouts = snapshot.layouts
+        emptySettings = snapshot.emptySettings; emptyMockupID = snapshot.emptyMockupID
+        selectedScreenshotID = snapshot.selectedScreenshotID; jpeg = snapshot.jpeg; openings = snapshot.openings
+        // Keep any library association learned after the edit (library operations aren't undoable).
+        let associations = snapshot.libraryIDs.merging(libraryIDs) { _, latest in latest }
+        libraryIDs = associations.filter { id, _ in mockups.contains { $0.id == id } }
+    }
+
+    func undo() {
+        guard !isBusy, !isPresentingProjectDialog, !isShowingFrameLibrary else { return }
+        finishEditing(); lastCoalescingKey = nil
+        history.undo(); historyRevision += 1
+    }
+    func redo() {
+        guard !isBusy, !isPresentingProjectDialog, !isShowingFrameLibrary else { return }
+        finishEditing(); lastCoalescingKey = nil
+        history.redo(); historyRevision += 1
+    }
+
+    private func settingsCoalescingKey(from old: CompositionSettings, to new: CompositionSettings) -> String? {
+        var comparison = ProjectSettings(old)
+        let updated = ProjectSettings(new)
+        let key: String
+        if old.headline.firstLine != new.headline.firstLine {
+            comparison.headline?.firstLine = new.headline.firstLine; key = "firstLine"
+        } else if old.headline.secondLine != new.headline.secondLine {
+            comparison.headline?.secondLine = new.headline.secondLine; key = "secondLine"
+        } else if old.headline.color != new.headline.color {
+            comparison.headline?.red = new.headline.red; comparison.headline?.green = new.headline.green
+            comparison.headline?.blue = new.headline.blue; key = "textColor"
+        } else if old.background != new.background {
+            comparison.red = updated.red; comparison.green = updated.green; comparison.blue = updated.blue; key = "background"
+        } else if old.effects.glowColor != new.effects.glowColor {
+            comparison.effects?.glowRed = new.effects.glowRed; comparison.effects?.glowGreen = new.effects.glowGreen
+            comparison.effects?.glowBlue = new.effects.glowBlue; key = "glowColor"
+        } else { return nil }
+        return comparison == updated ? key : nil
+    }
+
     var projectTitle: String { projectURL?.deletingPathExtension().lastPathComponent ?? "Untitled" }
     var fingerprint: ProjectFingerprint {
         ProjectFingerprint(screenshots: screenshots.map(\.id), mockups: mockups.map(\.id),
@@ -175,6 +307,10 @@ final class EditorModel {
     }
 
     private func applyPreparedProject(_ project: PreparedProject, at url: URL) {
+        history.removeAllActions()
+        editDepth = 0; editStart = nil; lastCoalescingKey = nil
+        isRestoringHistory = true
+        defer { isRestoringHistory = false; historyRevision += 1 }
         screenshots = project.screenshots; mockups = project.mockups; openings = project.openings
         layouts = project.layouts; copiedStyle = nil
         emptySettings = project.settings; emptyMockupID = project.selectedMockupID
@@ -204,6 +340,8 @@ final class EditorModel {
 
     @discardableResult
     func writeProject(to url: URL) -> Bool {
+        finishEditing()
+        lastCoalescingKey = nil
         do {
             try makeProject().write(to: url)
             adoptProjectURL(url)
@@ -364,6 +502,8 @@ final class EditorModel {
     }
 
     func load(_ urls: [URL], asMockups: Bool) {
+        if !asMockups { beginEditing("Import Screenshots") }
+        defer { if !asMockups { endEditing() } }
         var failures: [String] = []
         for url in urls {
             do {
@@ -392,12 +532,16 @@ final class EditorModel {
     var manualCalibrationEnabled: Bool {
         get { settings.manualScreen }
         set {
+            beginEditing("Change Screen Calibration")
+            defer { endEditing() }
             if newValue && !settings.manualScreen { copyDetectedScreenBounds() }
             settings.manualScreen = newValue
         }
     }
 
     func resetScreenCalibration() {
+        beginEditing("Reset Screen Calibration")
+        defer { endEditing() }
         copyDetectedScreenBounds()
         settings.manualScreen = false
     }
@@ -409,6 +553,8 @@ final class EditorModel {
     }
 
     func selectMockup(_ id: UUID?) {
+        beginEditing("Change Frame")
+        defer { endEditing() }
         guard id != selectedMockupID else { return }
         selectedMockupID = id
         settings.manualScreen = false
@@ -419,12 +565,16 @@ final class EditorModel {
     }
 
     func removeScreenshot(_ id: UUID) {
+        beginEditing("Remove Screenshot")
+        defer { endEditing() }
         screenshots.removeAll { $0.id == id }
         layouts[id] = nil
         if selectedScreenshotID == id { selectedScreenshotID = screenshots.first?.id }
     }
 
     func duplicateScreenshot(_ id: UUID) {
+        beginEditing("Duplicate Screenshot")
+        defer { endEditing() }
         guard let index = screenshots.firstIndex(where: { $0.id == id }) else { return }
         let source = screenshots[index]
         let duplicate = ImportedImage(id: UUID(), name: source.name + " copy", image: source.image)
@@ -434,6 +584,8 @@ final class EditorModel {
     }
 
     func moveScreenshots(from offsets: IndexSet, to destination: Int) {
+        beginEditing("Reorder Screenshots")
+        defer { endEditing() }
         let moving = offsets.sorted().map { screenshots[$0] }
         let insertion = destination - offsets.filter { $0 < destination }.count
         for index in offsets.sorted(by: >) { screenshots.remove(at: index) }
@@ -447,12 +599,26 @@ final class EditorModel {
     }
 
     var canPasteStyle: Bool { copiedStyle != nil }
-    func copyStyle(from id: UUID) { copiedStyle = layout(for: id) }
+    func copyStyle(from id: UUID) {
+        let layout = layout(for: id)
+        copiedStyle = CopiedStyle(layout: layout, frame: mockups.first { $0.id == layout.mockupID },
+                                  opening: screenOpening(for: layout.mockupID),
+                                  libraryID: layout.mockupID.flatMap { libraryIDs[$0] })
+    }
     func pasteStyle(to id: UUID) {
+        beginEditing("Paste Style")
+        defer { endEditing() }
         guard let style = copiedStyle else { return }
-        applyStyle(style, to: id)
+        if let frame = style.frame, !mockups.contains(where: { $0.id == frame.id }) {
+            mockups.append(frame)
+            openings[frame.id] = style.opening
+            libraryIDs[frame.id] = style.libraryID
+        }
+        applyStyle(style.layout, to: id)
     }
     func applyStyleToAll(from id: UUID) {
+        beginEditing("Apply Style to All")
+        defer { endEditing() }
         let style = layout(for: id)
         for shot in screenshots where shot.id != id { applyStyle(style, to: shot.id) }
     }
