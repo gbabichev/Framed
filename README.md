@@ -7,12 +7,12 @@ A native SwiftUI macOS app for placing device screenshots inside your own transp
 2. Add screenshots from your simulator or real device. Multiple images can be imported together.
 3. Open the visual Frame Library in the inspector, import front-facing PNG mockups, and choose a thumbnail. The largest enclosed transparent screen opening is detected automatically; camera cutouts remain visible.
 4. Choose an Export Canvas size, background, scale, and Fit or Fill. When a frame has a detected or manually calibrated screen, Use Suggested Canvas offers a supported size based on its screen proportions and pixel dimensions. Applying it is optional; selecting a frame keeps your existing canvas. The frame keeps its orientation. Check the preview and any aspect-ratio or enlargement warnings.
-5. Click Export in the toolbar (⌘E) to open the export sheet. Review the preview, choose PNG or JPEG and the PNG transparency option, then export the selected screenshot or all screenshots. The final Export button opens a native destination picker; batch exports create a new folder using the same layout.
+5. Click Export in the toolbar (⌘E) to open the export sheet. Review the preview, choose PNG or JPEG and the PNG transparency option, then export the selected screenshot or all screenshots. The final Export button opens a native destination picker; batch exports create a new folder using each screenshot’s own layout in sidebar order.
 
 Exports use sRGB at the selected pixel dimensions. In Appearance, enable Transparent background to export a PNG with alpha; the preview shows a checkerboard that is not included in the file. JPEG always uses the selected background color. Transparency is saved with the project. App Store uploads require an opaque background, so turn transparency off for those exports. The app uses user-selected file access and processes images locally. Use File → Save Project (⌘S), Save Project As (⇧⌘S), and Open Project (⌘O) to continue work later. The `.framed` project embeds screenshots and mockups along with the canvas settings, so it can be moved without its source images. Canvas edits show the native dirty-window indicator. Closing a dirty window or quitting offers Save, Don’t Save, and Cancel; cancelling or failing a save preserves your work. Exporting images does not save the project.
 
 ## Mockup requirements
-The screen and exterior background should be transparent. Automatic screen detection is recommended. If it needs correction, expand Screen calibration and enable Adjust screen edges manually. The preview shows a blue outline (excluded from exports). Left/right edges are measured across the frame image; top/bottom edges are measured down it. Edges keep the opposite edge fixed and cannot cross. Manual mode starts from the detected screen; Reset to Detected Screen returns to automatic detection and its camera-cutout mask. Manual calibration uses a rounded rectangle instead of that mask. Fit may leave black bars when the screen and screenshot proportions differ; Fill crops to cover the screen. An opaque screen placeholder must be removed in an image editor first. Perspective/angled device transformations are not supported. Start with a frame that matches the screenshot's device and orientation; Fit preserves the screenshot with letterboxing, while Fill may crop.
+The screen and exterior background should be transparent. Automatic screen detection is recommended. If it needs correction, enable Adjust screen edges manually. The preview shows a blue outline (excluded from exports). Left/right edges are measured across the frame image; top/bottom edges are measured down it. Edges keep the opposite edge fixed and cannot cross. Manual mode starts from the detected screen; Reset to Detected Screen returns to automatic detection and its camera-cutout mask. Manual calibration uses a rounded rectangle instead of that mask. Fit may leave black bars when the screen and screenshot proportions differ; Fill crops to cover the screen. An opaque screen placeholder must be removed in an image editor first. Perspective/angled device transformations are not supported. Start with a frame that matches the screenshot's device and orientation; Fit preserves the screenshot with letterboxing, while Fill may crop.
 
 The local catalog contains common accepted sizes for iPhone, iPhone Duo, iPad, Mac, Apple TV, Vision Pro, and Apple Watch. It is dated October 16, 2026, and links to [Apple's screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications). It does not enumerate every legacy size or guarantee App Review acceptance. Apple allows up to 10 screenshots per device size; select the required sets for the platforms your app supports.
 
@@ -87,7 +87,7 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 
 Checks cover toggle/range/filter selection, stale selections, bulk deletion, Remove All, persistence, and preservation of the current project's frame.
 
-Frame import is always a global-library operation, including the main toolbar and inspector plus button. It never adds images to the project, changes its selected frame, or changes its dirty state. Only choosing Use Frame applies a library frame to the canvas. New library entries are saved immediately in Application Support; saving a `.framed` project is not required to keep them.
+Frame import is always a global-library operation, including the inspector plus button. It never adds images to the project, changes its selected frame, or changes its dirty state. Only choosing Use Frame applies a library frame to the canvas. New library entries are saved immediately in Application Support; saving a `.framed` project is not required to keep them.
 
 ## Canvas suggestion checks
 
@@ -136,7 +136,7 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 
 Enable Show headline in the inspector to add up to two centered lines. Each field supplies one line; long lines use an ellipsis instead of adding more lines. Choose any installed font family, weight, size in export pixels, and color. Drag the headline in the preview or use the horizontal/vertical position sliders; Reset Position restores its starting location. The selection outline is a preview guide and is excluded from exports. Reduce device scale if you need more room above the frame. Text is rendered above device effects and remains sharp rather than fading with the device.
 
-Headline size and position scale proportionally when you change the canvas dimensions. All headline settings save with the project and participate in dirty-window tracking. Fonts are referenced by family rather than embedded; unavailable fonts fall back to the system font. Older projects open with headlines disabled. Batch export uses the current headline for every screenshot.
+Headline size and position scale proportionally when you change the canvas dimensions. All headline settings save with the project and participate in dirty-window tracking. Fonts are referenced by family rather than embedded; unavailable fonts fall back to the system font. Older projects open with headlines disabled. Batch export uses each screenshot’s own headline.
 
 ```sh
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/HeadlineChecks.swift -o /tmp/framed-headline-checks
@@ -164,3 +164,18 @@ Appearance offers Show center guides and Snap to center. Guides draw the canvas�
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Tests/CenterSnappingChecks.swift -o /tmp/framed-snapping-checks
 /tmp/framed-snapping-checks
 ```
+
+## Individual screenshot layouts
+
+Select a screenshot in the sidebar to edit its own frame, canvas, background, device placement, headline, calibration, and effects. Newly imported screenshots start with the selected screenshot’s style. Browsing between screenshots does not mark the project as changed.
+
+Right-click a screenshot for Duplicate, Move Up/Down, Copy Style, Paste Style, and Apply Style to All. Duplicate copies the image and full layout; Paste Style and Apply Style to All preserve each destination’s headline text. The copied style is available within the current open project. The sidebar also supports native list reordering; its order determines numbered batch export filenames. PNG batch exports retain each layout’s transparency choice; JPEG uses each layout’s background color.
+
+Project format version 2 saves all layouts and screenshot order. Version 1 projects open with their original shared layout copied to every screenshot; saving upgrades them to version 2.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/PerScreenshotChecks.swift -o /tmp/framed-layout-checks
+/tmp/framed-layout-checks
+```
+
+Checks cover independent settings and frames, duplicate isolation, preserved headline text, ordering, clean selection changes, project roundtrips, version 1 migration, and invalid layout rejection.

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var model = EditorModel()
@@ -37,7 +38,7 @@ struct ContentView: View {
             ToolbarItemGroup {
                 Button { exportPresented = true } label: { Label("Export", systemImage: "square.and.arrow.up") }
                     .keyboardShortcut("e", modifiers: .command)
-                    .disabled(!model.canExport)
+                    .disabled(!model.canExport && !model.canExportAll)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button("Inspector", systemImage: "sidebar.right") {
@@ -66,6 +67,7 @@ struct ContentView: View {
 
 private struct ScreenshotSidebar: View {
     @Bindable var model: EditorModel
+    @State private var applyStyleSource: UUID?
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if model.screenshots.isEmpty {
@@ -87,15 +89,47 @@ private struct ScreenshotSidebar: View {
                         ScreenshotRow(name: shot.name, image: shot.image, remove: { model.removeScreenshot(shot.id) })
                             .tag(shot.id)
                             .listRowBackground(Color.clear)
+                            .onDrag { NSItemProvider(object: shot.id.uuidString as NSString) }
                             .contextMenu {
+                                Button("Duplicate") { model.duplicateScreenshot(shot.id) }
+                                Button("Move Up") { model.moveScreenshot(shot.id, by: -1) }
+                                    .disabled(model.screenshots.first?.id == shot.id)
+                                Button("Move Down") { model.moveScreenshot(shot.id, by: 1) }
+                                    .disabled(model.screenshots.last?.id == shot.id)
+                                Divider()
+                                Button("Copy Style") { model.copyStyle(from: shot.id) }
+                                Button("Paste Style") { model.pasteStyle(to: shot.id) }.disabled(!model.canPasteStyle)
+                                Button("Apply Style to All…") { applyStyleSource = shot.id }
+                                    .disabled(model.screenshots.count < 2)
+                                Divider()
                                 Button("Remove", role: .destructive) { model.removeScreenshot(shot.id) }
                             }
+                    }
+                    .onMove(perform: model.moveScreenshots)
+                    .onInsert(of: [.plainText]) { destination, providers in
+                        guard let provider = providers.first else { return }
+                        _ = provider.loadObject(ofClass: NSString.self) { value, _ in
+                            guard let value = value as? String, let id = UUID(uuidString: value) else { return }
+                            Task { @MainActor in
+                                guard let index = model.screenshots.firstIndex(where: { $0.id == id }) else { return }
+                                model.moveScreenshots(from: IndexSet(integer: index), to: min(destination, model.screenshots.count))
+                            }
+                        }
                     }
                 }
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
                 .background(Color.clear)
             }
+        }
+        .confirmationDialog("Apply this style to all screenshots?", isPresented: Binding(get: { applyStyleSource != nil }, set: { if !$0 { applyStyleSource = nil } })) {
+            Button("Apply Style to All") {
+                if let id = applyStyleSource { model.applyStyleToAll(from: id) }
+                applyStyleSource = nil
+            }
+            Button("Cancel", role: .cancel) { applyStyleSource = nil }
+        } message: {
+            Text("Replaces each screenshot’s frame, canvas, appearance, headline styling, and effects. Each headline’s text is kept.")
         }
     }
 }
@@ -757,13 +791,20 @@ private struct ExportDialog: View {
                                     Text("PNG").tag(false)
                                     Text("JPEG").tag(true)
                                 }.pickerStyle(.segmented).labelsHidden()
-                                InspectorSwitch("Transparent PNG background", isOn: $model.settings.transparentBackground)
-                                    .disabled(model.jpeg)
-                                Text(model.jpeg ? "JPEG uses the background color selected in Appearance."
-                                     : model.settings.transparentBackground ? "Transparency is preserved. App Store uploads require an opaque background."
-                                     : "Opaque sRGB PNG at the selected canvas dimensions.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                if exportAll {
+                                    Text(model.jpeg ? "JPEG uses each screenshot’s own background color."
+                                         : "Each screenshot keeps its own background and transparency settings.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                } else {
+                                    InspectorSwitch("Transparent PNG background", isOn: $model.settings.transparentBackground)
+                                        .disabled(model.jpeg)
+                                    Text(model.jpeg ? "JPEG uses the background color selected in Appearance."
+                                         : model.settings.transparentBackground ? "Transparency is preserved. App Store uploads require an opaque background."
+                                         : "Opaque sRGB PNG at the selected canvas dimensions.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                         }
                         InspectorCard("Screenshots", systemImage: "photo.on.rectangle") {
@@ -771,12 +812,12 @@ private struct ExportDialog: View {
                                 Text("Selected screenshot").tag(false)
                                 Text("All screenshots (\(model.screenshots.count))").tag(true)
                             }.pickerStyle(.radioGroup).labelsHidden()
-                            Text(exportAll ? "Every screenshot uses the current frame, headline, and layout. A new folder will be created."
+                            Text(exportAll ? "Each screenshot uses its own frame, headline, canvas, and effects. Files follow the sidebar order in a new folder."
                                  : model.selectedScreenshot?.name ?? "No screenshot selected")
                                 .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        LabeledContent("Canvas", value: "\(Int(model.settings.outputSize.width)) × \(Int(model.settings.outputSize.height)) px")
+                        LabeledContent(exportAll ? "Preview canvas" : "Canvas", value: "\(Int(model.settings.outputSize.width)) × \(Int(model.settings.outputSize.height)) px")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     .disabled(model.isBusy)
@@ -798,7 +839,7 @@ private struct ExportDialog: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(!model.canExport)
+                .disabled(exportAll ? !model.canExportAll : !model.canExport)
             }.padding(16)
         }
         .frame(width: 720, height: 580)

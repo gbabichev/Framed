@@ -100,20 +100,32 @@ nonisolated struct ProjectImage: Codable, Sendable {
     }
 }
 
+struct ProjectScreenshotLayout: Codable, Equatable {
+    var screenshotID: UUID
+    var mockupID: UUID?
+    var settings: ProjectSettings
+}
+
+struct ScreenshotLayout {
+    var settings: CompositionSettings
+    var mockupID: UUID?
+}
+
 struct FramedProject: Codable {
-    var version = 1
+    var version = 2
     var screenshots: [ProjectImage]
     var mockups: [ProjectImage]
     var selectedScreenshotID: UUID?
     var selectedMockupID: UUID?
     var settings: ProjectSettings
     var jpeg: Bool
+    var layouts: [ProjectScreenshotLayout]?
 
     static func read(from url: URL) throws -> Self {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let project = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
-        guard project.version == 1 else { throw FramedError.message("This project was created by a newer version of Framed.") }
+        guard (1...2).contains(project.version) else { throw FramedError.message("This project was created by a newer version of Framed.") }
         return project
     }
 
@@ -130,7 +142,8 @@ struct FramedProject: Codable {
 struct ProjectFingerprint: Equatable {
     var screenshots: [UUID]
     var mockups: [UUID]
-    var selectedMockupID: UUID?
-    var settings: ProjectSettings
+    var layouts: [ProjectScreenshotLayout]
+    var emptySettings: ProjectSettings?
+    var emptyMockupID: UUID?
     var jpeg: Bool
 }

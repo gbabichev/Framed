@@ -7,8 +7,36 @@ final class EditorModel {
     var screenshots: [ImportedImage] = []
     var mockups: [ImportedImage] = []
     var selectedScreenshotID: UUID?
-    var selectedMockupID: UUID?
-    var settings = CompositionSettings()
+    private var layouts: [UUID: ScreenshotLayout] = [:]
+    private var emptySettings = CompositionSettings()
+    private var emptyMockupID: UUID?
+    private var copiedStyle: ScreenshotLayout?
+    private var effectiveScreenshotID: UUID? { selectedScreenshotID ?? screenshots.first?.id }
+    var settings: CompositionSettings {
+        get { effectiveScreenshotID.map { layout(for: $0).settings } ?? emptySettings }
+        set {
+            if let id = effectiveScreenshotID {
+                var layout = layout(for: id); layout.settings = newValue; layouts[id] = layout
+            } else { emptySettings = newValue }
+        }
+    }
+    var selectedMockupID: UUID? {
+        get { effectiveScreenshotID.map { layout(for: $0).mockupID } ?? emptyMockupID }
+        set {
+            if let id = effectiveScreenshotID {
+                var layout = layout(for: id); layout.mockupID = newValue; layouts[id] = layout
+            } else { emptyMockupID = newValue }
+        }
+    }
+    func layout(for id: UUID) -> ScreenshotLayout {
+        layouts[id] ?? ScreenshotLayout(settings: emptySettings, mockupID: emptyMockupID)
+    }
+    private var projectLayouts: [ProjectScreenshotLayout] {
+        screenshots.map { shot in
+            let layout = layout(for: shot.id)
+            return ProjectScreenshotLayout(screenshotID: shot.id, mockupID: layout.mockupID, settings: ProjectSettings(layout.settings))
+        }
+    }
     var jpeg = false
     var error: String?
     var status = "Import screenshots to get started."
@@ -122,18 +150,19 @@ final class EditorModel {
     var projectTitle: String { projectURL?.deletingPathExtension().lastPathComponent ?? "Untitled" }
     var fingerprint: ProjectFingerprint {
         ProjectFingerprint(screenshots: screenshots.map(\.id), mockups: mockups.map(\.id),
-                           selectedMockupID: selectedMockupID, settings: ProjectSettings(settings), jpeg: jpeg)
+                           layouts: projectLayouts, emptySettings: screenshots.isEmpty ? ProjectSettings(emptySettings) : nil,
+                           emptyMockupID: screenshots.isEmpty ? emptyMockupID : nil, jpeg: jpeg)
     }
     var isDirty: Bool { fingerprint != savedFingerprint }
 
     func makeProject() throws -> FramedProject {
         try FramedProject(screenshots: screenshots.map { try ProjectImage($0) }, mockups: mockups.map { try ProjectImage($0) },
                           selectedScreenshotID: selectedScreenshotID, selectedMockupID: selectedMockupID,
-                          settings: ProjectSettings(settings), jpeg: jpeg)
+                          settings: ProjectSettings(settings), jpeg: jpeg, layouts: projectLayouts)
     }
 
     func restoreProject(_ project: FramedProject, at url: URL) throws {
-        guard project.version == 1 else { throw FramedError.message("Unsupported project version.") }
+        guard (1...2).contains(project.version) else { throw FramedError.message("Unsupported project version.") }
         // Decode and validate everything before replacing the current canvas.
         let restoredSettings = try project.settings.restored()
         let shots = try project.screenshots.map { try $0.restored() }
@@ -144,13 +173,31 @@ final class EditorModel {
               project.selectedMockupID == nil || frames.contains(where: { $0.id == project.selectedMockupID }) else {
             throw FramedError.message("This project contains invalid image references.")
         }
+        var restoredLayouts: [UUID: ScreenshotLayout] = [:]
+        if project.version == 2 {
+            guard let records = project.layouts, records.count == shots.count,
+                  Set(records.map(\.screenshotID)) == Set(shots.map(\.id)) else {
+                throw FramedError.message("This project contains missing or duplicate screenshot layouts.")
+            }
+            for record in records {
+                guard record.mockupID == nil || frames.contains(where: { $0.id == record.mockupID }) else {
+                    throw FramedError.message("A screenshot layout refers to a missing frame.")
+                }
+                restoredLayouts[record.screenshotID] = ScreenshotLayout(settings: try record.settings.restored(), mockupID: record.mockupID)
+            }
+        } else {
+            for shot in shots {
+                restoredLayouts[shot.id] = ScreenshotLayout(settings: restoredSettings, mockupID: project.selectedMockupID)
+            }
+        }
         let detected = Dictionary(uniqueKeysWithValues: frames.compactMap { frame in
             ScreenOpening.detect(in: frame.image).map { (frame.id, $0) }
         })
         screenshots = shots; mockups = frames; openings = detected
+        layouts = restoredLayouts; copiedStyle = nil
+        emptySettings = restoredSettings; emptyMockupID = project.selectedMockupID
         selectedScreenshotID = project.selectedScreenshotID ?? shots.first?.id
-        selectedMockupID = project.selectedMockupID
-        settings = restoredSettings; jpeg = project.jpeg
+        jpeg = project.jpeg
         adoptProjectURL(url)
         savedFingerprint = fingerprint
         status = "Opened \(url.lastPathComponent)."
@@ -318,7 +365,9 @@ final class EditorModel {
                 if asMockups {
                     try frameLibrary.store(imported)
                 } else {
+                    let inherited = ScreenshotLayout(settings: settings, mockupID: selectedMockupID)
                     screenshots.append(imported)
+                    layouts[imported.id] = inherited
                     selectedScreenshotID = imported.id
                     if screenshots.count == 1 {
                         let w = imported.image.width, h = imported.image.height
@@ -365,7 +414,55 @@ final class EditorModel {
 
     func removeScreenshot(_ id: UUID) {
         screenshots.removeAll { $0.id == id }
+        layouts[id] = nil
         if selectedScreenshotID == id { selectedScreenshotID = screenshots.first?.id }
+    }
+
+    func duplicateScreenshot(_ id: UUID) {
+        guard let index = screenshots.firstIndex(where: { $0.id == id }) else { return }
+        let source = screenshots[index]
+        let duplicate = ImportedImage(id: UUID(), name: source.name + " copy", image: source.image)
+        layouts[duplicate.id] = layout(for: id)
+        screenshots.insert(duplicate, at: index + 1)
+        selectedScreenshotID = duplicate.id
+    }
+
+    func moveScreenshots(from offsets: IndexSet, to destination: Int) {
+        let moving = offsets.sorted().map { screenshots[$0] }
+        let insertion = destination - offsets.filter { $0 < destination }.count
+        for index in offsets.sorted(by: >) { screenshots.remove(at: index) }
+        screenshots.insert(contentsOf: moving, at: insertion)
+    }
+
+    func moveScreenshot(_ id: UUID, by distance: Int) {
+        guard let index = screenshots.firstIndex(where: { $0.id == id }),
+              screenshots.indices.contains(index + distance) else { return }
+        moveScreenshots(from: IndexSet(integer: index), to: distance > 0 ? index + distance + 1 : index + distance)
+    }
+
+    var canPasteStyle: Bool { copiedStyle != nil }
+    func copyStyle(from id: UUID) { copiedStyle = layout(for: id) }
+    func pasteStyle(to id: UUID) {
+        guard let style = copiedStyle else { return }
+        applyStyle(style, to: id)
+    }
+    func applyStyleToAll(from id: UUID) {
+        let style = layout(for: id)
+        for shot in screenshots where shot.id != id { applyStyle(style, to: shot.id) }
+    }
+    private func applyStyle(_ style: ScreenshotLayout, to id: UUID) {
+        var result = style
+        let text = layout(for: id).settings.headline
+        result.settings.headline.firstLine = text.firstLine
+        result.settings.headline.secondLine = text.secondLine
+        layouts[id] = result
+    }
+
+    var canExportAll: Bool {
+        !screenshots.isEmpty && !isBusy && screenshots.allSatisfy { shot in
+            let layout = layout(for: shot.id)
+            return layout.mockupID == nil || openings[layout.mockupID!] != nil || layout.settings.manualScreen
+        }
     }
 
     @discardableResult
@@ -385,29 +482,33 @@ final class EditorModel {
 
     @discardableResult
     func exportAll() -> Bool {
-        guard canExport else { return false }
+        guard canExportAll else { return false }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true
         panel.prompt = "Export here"
-        panel.message = "A new folder will be created for this export. Every screenshot uses the current frame and layout."
+        panel.message = "A new folder will be created for this export. Each screenshot uses its own saved layout."
         guard panel.runModal() == .OK, let directory = panel.url else { return false }
         isBusy = true
         status = "Exporting \(screenshots.count) screenshots…"
         // Yield between images so progress and window events remain responsive.
         Task { @MainActor in
             let folder = directory.appendingPathComponent("Framed-\(UUID().uuidString.prefix(8))", isDirectory: true)
-            let images = screenshots, configuration = settings, mockup = selectedMockup?.image, mask = opening, useJPEG = jpeg
+            let jobs = screenshots.map { shot in (shot, layout(for: shot.id)) }
+            let frames = mockups, masks = openings, useJPEG = jpeg
             var count = 0
             defer { isBusy = false }
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
-                for (index, shot) in images.enumerated() {
-                    let image = try CompositionRenderer.render(screenshot: shot.image, mockup: mockup, opening: mask, settings: configuration, forceOpaque: useJPEG)
+                for (index, job) in jobs.enumerated() {
+                    let (shot, layout) = job
+                    let mockup = frames.first { $0.id == layout.mockupID }?.image
+                    let mask = layout.mockupID.flatMap { masks[$0] }
+                    let image = try CompositionRenderer.render(screenshot: shot.image, mockup: mockup, opening: mask, settings: layout.settings, forceOpaque: useJPEG)
                     let safeName = shot.name.replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: "/", with: "-")
                     let url = folder.appendingPathComponent(String(format: "%02d-", index + 1) + safeName + (useJPEG ? ".jpg" : ".png"))
                     try CompositionRenderer.encode(image, jpeg: useJPEG).write(to: url, options: .atomic)
                     count += 1
-                    status = "Exported \(count) of \(images.count)…"
+                    status = "Exported \(count) of \(jobs.count)…"
                     await Task.yield()
                 }
                 status = "Saved \(count) screenshots in \(folder.lastPathComponent)."
