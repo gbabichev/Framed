@@ -123,6 +123,17 @@ struct FrameLibraryBrowser: View {
                     Label("Import…", systemImage: "plus")
                 }
             }.padding(20)
+            VStack(alignment: .leading, spacing: 4) {
+                Link(destination: URL(string: "https://developer.apple.com/design/resources/")!) {
+                    Label("Get frames from Apple Design Resources", systemImage: "arrow.up.right")
+                }
+                Text("Download device bezels from Apple, then import transparent PNGs here. If needed, export PNGs from the downloaded design files. Apple device artwork is not included with Framed.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20).padding(.bottom, 12)
             Picker("Device family", selection: $familyFilter) {
                 Text("All").tag(FrameDeviceFamily?.none)
                 ForEach(FrameDeviceFamily.allCases) { family in
@@ -140,7 +151,6 @@ struct FrameLibraryBrowser: View {
                                clear: { selection.clear(); noFrame = false },
                                removeSelected: { requestRemoval(selection.ids) },
                                removeAll: { requestRemoval(Set(library.frames.map(\.id)), all: true) })
-            Divider()
             HSplitView {
                 FrameGrid(frames: filteredFrames, hasLibraryFrames: !library.frames.isEmpty, selection: selection.ids, noFrame: noFrame,
                           select: selectFrame,
@@ -159,6 +169,8 @@ struct FrameLibraryBrowser: View {
                         .frame(width: 230)
                 }
             }
+            .frame(minHeight: 0, maxHeight: .infinity)
+            .clipped()
             Divider()
             HStack {
                 Text(familyFilter != nil || !search.isEmpty ? "\(filteredFrames.count) of \(library.frames.count) frames" : "\(library.frames.count) frames")
@@ -360,7 +372,9 @@ private struct FrameGrid: View {
                 Text(hasLibraryFrames ? "No matching frames. Try another device or search." : "Import PNG device frames to build your reusable library.")
                     .font(.callout).foregroundStyle(.secondary).padding(20)
             }
-        }.background(.primary.opacity(0.025))
+        }
+        .clipped()
+        .background(.primary.opacity(0.025))
     }
 }
 
@@ -401,7 +415,8 @@ private struct FrameDetails: View {
     let remove: (SavedFrame) -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            FrameThumbnail(image: frame?.thumbnail).frame(height: 240)
+            FrameThumbnail(image: frame?.thumbnail)
+                .frame(minHeight: 100, idealHeight: 180, maxHeight: 240)
             if let frame {
                 Text(frame.name).font(.headline).fixedSize(horizontal: false, vertical: true)
                 Text("\(frame.width) × \(frame.height) pixels").font(.caption).foregroundStyle(.secondary)

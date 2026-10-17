@@ -54,6 +54,7 @@ final class EditorModel {
     var error: String?
     var status = "Import screenshots to get started."
     var isBusy = false
+    private(set) var isChoosingExportLocation = false
     private var openings: [UUID: ScreenOpening] = [:]
     let frameLibrary: FrameLibrary
     private var libraryIDs: [UUID: UUID] = [:]
@@ -481,7 +482,7 @@ final class EditorModel {
                                                        height: CGFloat(frame.image.height) * bounds.height), family: family)
     }
 
-    var canExport: Bool { selectedScreenshot != nil && (selectedMockup == nil || opening != nil || settings.manualScreen) && !isBusy }
+    var canExport: Bool { selectedScreenshot != nil && (selectedMockup == nil || opening != nil || settings.manualScreen) && !isBusy && !isChoosingExportLocation }
 
     var warnings: [String] {
         guard let shot = selectedScreenshot else { return [] }
@@ -659,66 +660,84 @@ final class EditorModel {
     }
 
     var canExportAll: Bool {
-        !screenshots.isEmpty && !isBusy && screenshots.allSatisfy { shot in
+        !screenshots.isEmpty && !isBusy && !isChoosingExportLocation && screenshots.allSatisfy { shot in
             let layout = layout(for: shot.id)
             return layout.mockupID == nil || openings[layout.mockupID!] != nil || layout.settings.manualScreen
         }
     }
 
     @discardableResult
-    func exportSelected(options: ExportOptions = ExportOptions()) -> Bool {
+    func exportSelected(options: ExportOptions = ExportOptions(), onStart: @escaping () -> Void = {}) -> Bool {
         guard let screenshot = selectedScreenshot, canExport else { return false }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [jpeg ? .jpeg : .png]
         panel.nameFieldStringValue = "\(screenshot.name)-framed.\(jpeg ? "jpg" : "png")"
-        guard panel.runModal() == .OK, let url = panel.url else { return false }
-        let frame = selectedMockup?.image, mask = opening, layout = settings, useJPEG = jpeg
-        let access = url.startAccessingSecurityScopedResource()
-        isBusy = true; status = "Exporting screenshot…"
-        Task { @MainActor in
-            defer { isBusy = false; if access { url.stopAccessingSecurityScopedResource() } }
-            do {
-                try await ExportWorker.write(screenshot: screenshot, mockup: frame, opening: mask,
-                    settings: layout, jpeg: useJPEG, options: options, url: url, overwrite: true)
-                status = "Saved \(url.lastPathComponent)."
-            } catch { self.error = error.localizedDescription }
+        return presentExportDestination(panel) { [self] response in
+            guard response == .OK, let url = panel.url else { return }
+            onStart()
+            let frame = selectedMockup?.image, mask = opening, layout = settings, useJPEG = jpeg
+            let access = url.startAccessingSecurityScopedResource()
+            isBusy = true; status = "Exporting screenshot…"
+            Task { @MainActor in
+                defer { isBusy = false; if access { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    try await ExportWorker.write(screenshot: screenshot, mockup: frame, opening: mask,
+                        settings: layout, jpeg: useJPEG, options: options, url: url, overwrite: true)
+                    status = "Saved \(url.lastPathComponent)."
+                } catch { self.error = error.localizedDescription }
+            }
         }
-        return true
     }
 
     @discardableResult
-    func exportAll(options: ExportOptions = ExportOptions()) -> Bool {
+    func exportAll(options: ExportOptions = ExportOptions(), onStart: @escaping () -> Void = {}) -> Bool {
         guard canExportAll else { return false }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false; panel.canCreateDirectories = true
         panel.prompt = "Export Here"
         panel.message = "Screenshots will be saved directly in this folder. Existing files will be kept."
-        guard panel.runModal() == .OK, let directory = panel.url else { return false }
-        let access = directory.startAccessingSecurityScopedResource()
-        let jobs = screenshots.map { shot in (shot, layout(for: shot.id)) }
-        let frames = mockups, masks = openings, useJPEG = jpeg
-        isBusy = true
-        status = "Exporting \(jobs.count) screenshots…"
-        Task { @MainActor in
-            var count = 0
-            defer { isBusy = false; if access { directory.stopAccessingSecurityScopedResource() } }
-            do {
-                for (index, job) in jobs.enumerated() {
-                    let (shot, layout) = job
-                    let mockup = frames.first { $0.id == layout.mockupID }?.image
-                    let mask = layout.mockupID.flatMap { masks[$0] }
-                    let url = ExportWorker.availableURL(in: directory,
-                        name: String(format: "%02d-", index + 1) + shot.name, extension: useJPEG ? "jpg" : "png")
-                    try await ExportWorker.write(screenshot: shot, mockup: mockup, opening: mask,
-                        settings: layout.settings, jpeg: useJPEG, options: options, url: url, overwrite: false)
-                    count += 1
-                    status = "Exported \(count) of \(jobs.count)…"
-                }
-                status = "Saved \(count) screenshots in \(directory.lastPathComponent)."
-                NSWorkspace.shared.activateFileViewerSelecting([directory])
-            } catch { self.error = "Export stopped after \(count) files. \(error.localizedDescription)" }
+        return presentExportDestination(panel) { [self] response in
+            guard response == .OK, let directory = panel.url else { return }
+            onStart()
+            let access = directory.startAccessingSecurityScopedResource()
+            let jobs = screenshots.map { shot in (shot, layout(for: shot.id)) }
+            let frames = mockups, masks = openings, useJPEG = jpeg
+            isBusy = true
+            status = "Exporting \(jobs.count) screenshots…"
+            Task { @MainActor in
+                var count = 0
+                defer { isBusy = false; if access { directory.stopAccessingSecurityScopedResource() } }
+                do {
+                    for (index, job) in jobs.enumerated() {
+                        let (shot, layout) = job
+                        let mockup = frames.first { $0.id == layout.mockupID }?.image
+                        let mask = layout.mockupID.flatMap { masks[$0] }
+                        let url = ExportWorker.availableURL(in: directory,
+                            name: String(format: "%02d-", index + 1) + shot.name, extension: useJPEG ? "jpg" : "png")
+                        try await ExportWorker.write(screenshot: shot, mockup: mockup, opening: mask,
+                            settings: layout.settings, jpeg: useJPEG, options: options, url: url, overwrite: false)
+                        count += 1
+                        status = "Exported \(count) of \(jobs.count)…"
+                    }
+                    status = "Saved \(count) screenshots in \(directory.lastPathComponent)."
+                    NSWorkspace.shared.activateFileViewerSelecting([directory])
+                } catch { self.error = "Export stopped after \(count) files. \(error.localizedDescription)" }
+            }
+        }
+    }
+    private func presentExportDestination(_ panel: NSSavePanel,
+                                          completion: @escaping (NSApplication.ModalResponse) -> Void) -> Bool {
+        guard !isChoosingExportLocation, var parent = window else { return false }
+        // The export settings are themselves a sheet. Attach to that sheet so the
+        // destination picker remains in the same flow instead of opening a window.
+        while let sheet = parent.attachedSheet { parent = sheet }
+        isChoosingExportLocation = true
+        panel.beginSheetModal(for: parent) { response in
+            self.isChoosingExportLocation = false
+            completion(response)
         }
         return true
     }
+
 }

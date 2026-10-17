@@ -1041,7 +1041,7 @@ private struct ExportDialog: View {
                     ExportSizeSettings(options: $exportOptions, exportAll: exportAll)
                     ExportScreenshotSettings(model: model, exportAll: $exportAll)
                 }
-                .disabled(model.isBusy)
+                .disabled(model.isBusy || model.isChoosingExportLocation)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
             }.padding(20)
             Divider()
@@ -1053,10 +1053,13 @@ private struct ExportDialog: View {
                 Spacer()
                 Button(showsStatus ? "Done" : "Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                    .disabled(model.isBusy)
+                    .disabled(model.isBusy || model.isChoosingExportLocation)
                 Button(exportAll ? "Export All…" : "Export…") {
-                    let started = exportAll ? model.exportAll(options: exportOptions) : model.exportSelected(options: exportOptions)
-                    if started { showsStatus = true }
+                    if exportAll {
+                        model.exportAll(options: exportOptions) { showsStatus = true }
+                    } else {
+                        model.exportSelected(options: exportOptions) { showsStatus = true }
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
@@ -1064,7 +1067,7 @@ private struct ExportDialog: View {
             }.padding(16)
         }
         .frame(width: 760, height: 620)
-        .interactiveDismissDisabled(model.isBusy)
+        .interactiveDismissDisabled(model.isBusy || model.isChoosingExportLocation)
         .alert("Export failed", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
