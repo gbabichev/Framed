@@ -347,6 +347,36 @@ nonisolated enum PreviewResolution {
     }
 }
 
+nonisolated struct DesktopSettings: Codable, Equatable, Sendable {
+    var enabled = false
+    var windowScale = 0.80
+    // Position within the available space; the entire image stays on the desktop.
+    var windowX = 0.5
+    var windowY = 0.5
+    var shadow = true
+    var topRed = 0.27, topGreen = 0.36, topBlue = 0.73
+    var bottomRed = 0.76, bottomGreen = 0.57, bottomBlue = 0.83
+
+    var topColor: NSColor {
+        get { NSColor(srgbRed: topRed, green: topGreen, blue: topBlue, alpha: 1) }
+        set {
+            guard let color = newValue.usingColorSpace(.sRGB) else { return }
+            topRed = color.redComponent; topGreen = color.greenComponent; topBlue = color.blueComponent
+        }
+    }
+    var bottomColor: NSColor {
+        get { NSColor(srgbRed: bottomRed, green: bottomGreen, blue: bottomBlue, alpha: 1) }
+        set {
+            guard let color = newValue.usingColorSpace(.sRGB) else { return }
+            bottomRed = color.redComponent; bottomGreen = color.greenComponent; bottomBlue = color.blueComponent
+        }
+    }
+    var isValid: Bool {
+        (0.2...1).contains(windowScale) && [windowX, windowY, topRed, topGreen, topBlue,
+            bottomRed, bottomGreen, bottomBlue].allSatisfy { (0...1).contains($0) }
+    }
+}
+
 nonisolated struct CompositionSettings: Sendable {
     var preset = ScreenshotPreset.all[0]
     var landscape = false
@@ -357,6 +387,7 @@ nonisolated struct CompositionSettings: Sendable {
     var transparentBackground = false
     var effects = CompositionEffects()
     var headline = HeadlineSettings()
+    var desktop = DesktopSettings()
     var fillScreen = false
     var manualScreen = false
     var screenX = 0.05
@@ -531,15 +562,44 @@ enum CompositionRenderer {
                 context.addPath(CGPath(roundedRect: screen, cornerWidth: radius, cornerHeight: radius, transform: nil))
                 context.clip()
             }
-            context.setFillColor(CGColor(gray: 0, alpha: 1))
-            context.fill(screen)
-            draw(screenshot, in: screen, fill: settings.fillScreen, context: context)
+            if settings.desktop.enabled {
+                drawDesktop(screenshot: screenshot, in: screen, settings: settings.desktop, context: context)
+            } else {
+                context.setFillColor(CGColor(gray: 0, alpha: 1))
+                context.fill(screen)
+                draw(screenshot, in: screen, fill: settings.fillScreen, context: context)
+            }
             context.restoreGState()
             context.draw(mockup, in: device)
         } else if let screenshot {
             let target = targetRect(canvas: size, settings: settings)
             draw(screenshot, in: target, fill: settings.fillScreen, context: context)
         }
+    }
+
+    private static func drawDesktop(screenshot: CGImage, in screen: CGRect,
+                                    settings: DesktopSettings, context: CGContext) {
+        if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                                     colors: [settings.topColor.cgColor, settings.bottomColor.cgColor] as CFArray,
+                                     locations: [0, 1]) {
+            context.drawLinearGradient(gradient, start: CGPoint(x: screen.minX, y: screen.maxY),
+                                       end: CGPoint(x: screen.maxX, y: screen.minY),
+                                       options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        }
+        let scale = min(screen.width / Double(screenshot.width), screen.height / Double(screenshot.height))
+            * settings.windowScale
+        let width = Double(screenshot.width) * scale, height = Double(screenshot.height) * scale
+        let window = CGRect(x: screen.minX + (screen.width - width) * settings.windowX,
+                            y: screen.minY + (screen.height - height) * (1 - settings.windowY),
+                            width: width, height: height)
+        context.saveGState()
+        if settings.shadow {
+            context.setShadow(offset: CGSize(width: 0, height: -screen.height * 0.012),
+                              blur: screen.height * 0.025, color: CGColor(gray: 0, alpha: 0.4))
+        }
+        // Draw source alpha intact, including rounded window corners and capture shadows.
+        context.draw(screenshot, in: window)
+        context.restoreGState()
     }
 
     private static func drawCornerGlow(in context: CGContext, size: CGSize, effects: CompositionEffects) {

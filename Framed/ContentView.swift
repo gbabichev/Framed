@@ -552,7 +552,7 @@ private struct InspectorPane: View {
                         MockupSettings(model: model)
                     }
                     InspectorCard("Appearance", systemImage: "paintpalette") {
-                        LayoutSettings(settings: $model.settings)
+                        LayoutSettings(hasFrame: model.selectedMockup != nil, settings: $model.settings)
                     }
                     InspectorCard("Headline", systemImage: "textformat") {
                         HeadlineSettingsView(settings: $model.settings)
@@ -677,10 +677,38 @@ private struct MockupSettings: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ScreenCalibrationSettings(model: model)
+                Divider()
+                DesktopBackdropSettings(desktop: $model.settings.desktop)
             } else {
                 Text("Import a front-facing PNG with a transparent screen.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct DesktopBackdropSettings: View {
+    @Binding var desktop: DesktopSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            InspectorSwitch("Desktop backdrop", isOn: $desktop.enabled)
+            Text("Place a window screenshot on a gradient desktop inside the frame. Works best with transparent window captures.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if desktop.enabled {
+                ColorPicker("Wallpaper start", selection: Binding(
+                    get: { Color(nsColor: desktop.topColor) },
+                    set: { desktop.topColor = NSColor($0) }), supportsOpacity: false)
+                ColorPicker("Wallpaper end", selection: Binding(
+                    get: { Color(nsColor: desktop.bottomColor) },
+                    set: { desktop.bottomColor = NSColor($0) }), supportsOpacity: false)
+                ValueSlider(title: "Window size", value: $desktop.windowScale, range: 0.2...1)
+                ValueSlider(title: "Window horizontal position", value: $desktop.windowX, range: 0...1)
+                ValueSlider(title: "Window vertical position", value: $desktop.windowY, range: 0...1)
+                InspectorSwitch("Window shadow", isOn: $desktop.shadow)
+                Button("Center Window") { desktop.windowX = 0.5; desktop.windowY = 0.5 }
             }
         }
     }
@@ -717,6 +745,7 @@ private struct ScreenCalibrationSettings: View {
 }
 
 private struct LayoutSettings: View {
+    let hasFrame: Bool
     @AppStorage(EditorPreferences.centerGuides) private var showCenterGuides = false
     @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
     @Binding var settings: CompositionSettings
@@ -736,7 +765,9 @@ private struct LayoutSettings: View {
                 Text("Fill").tag(true)
             }.pickerStyle(.segmented)
             .help("Fit keeps the whole screenshot. Fill crops to cover the screen.")
-            Text(settings.fillScreen ? "Fill covers the screen, cropping the screenshot if needed."
+            .disabled(hasFrame && settings.desktop.enabled)
+            Text(hasFrame && settings.desktop.enabled ? "Desktop backdrop keeps the window’s proportions. Use Window size in Device Frame to resize it."
+                 : settings.fillScreen ? "Fill covers the screen, cropping the screenshot if needed."
                  : "Fit shows the whole screenshot. Different proportions leave black bars inside the device.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

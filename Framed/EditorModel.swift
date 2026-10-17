@@ -294,6 +294,12 @@ final class EditorModel {
         } else if old.effects.glowColor != new.effects.glowColor {
             comparison.effects?.glowRed = new.effects.glowRed; comparison.effects?.glowGreen = new.effects.glowGreen
             comparison.effects?.glowBlue = new.effects.glowBlue; key = "glowColor"
+        } else if old.desktop.topColor != new.desktop.topColor {
+            comparison.desktop?.topRed = new.desktop.topRed; comparison.desktop?.topGreen = new.desktop.topGreen
+            comparison.desktop?.topBlue = new.desktop.topBlue; key = "desktopTopColor"
+        } else if old.desktop.bottomColor != new.desktop.bottomColor {
+            comparison.desktop?.bottomRed = new.desktop.bottomRed; comparison.desktop?.bottomGreen = new.desktop.bottomGreen
+            comparison.desktop?.bottomBlue = new.desktop.bottomBlue; key = "desktopBottomColor"
         } else { return nil }
         return comparison == updated ? key : nil
     }
@@ -485,14 +491,17 @@ final class EditorModel {
             target = CGSize(width: device.width * bounds.width, height: device.height * bounds.height)
             let screenAspect = target.width / target.height
             let shotAspect = Double(shot.image.width) / Double(shot.image.height)
-            if abs(screenAspect / shotAspect - 1) > 0.025 {
+            if !settings.desktop.enabled && abs(screenAspect / shotAspect - 1) > 0.025 {
                 messages.append(settings.fillScreen ? "Aspect ratios differ. Fill crops the screenshot; check the preview." : "Aspect ratios differ. Fit keeps all content with black bars inside the screen.")
             }
         } else {
             target.width *= settings.deviceScale; target.height *= settings.deviceScale
         }
         let sx = target.width / Double(shot.image.width), sy = target.height / Double(shot.image.height)
-        if (settings.fillScreen ? max(sx, sy) : min(sx, sy)) > 1.05 {
+        let imageScale = selectedMockup != nil && settings.desktop.enabled
+            ? min(sx, sy) * settings.desktop.windowScale
+            : (settings.fillScreen ? max(sx, sy) : min(sx, sy))
+        if imageScale > 1.05 {
             messages.append("The screenshot will be enlarged. A higher-resolution source will look sharper.")
         }
         return messages

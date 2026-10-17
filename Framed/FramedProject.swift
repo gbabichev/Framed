@@ -18,6 +18,7 @@ nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
     var transparentBackground: Bool?
     var effects: CompositionEffects?
     var headline: HeadlineSettings?
+    var desktop: DesktopSettings?
     var fillScreen: Bool
     var manualScreen: Bool
     var screenX: Double
@@ -33,6 +34,7 @@ nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
         transparentBackground = settings.transparentBackground
         effects = settings.effects
         headline = settings.headline
+        desktop = settings.desktop
         let color = settings.background.usingColorSpace(.sRGB) ?? .white
         red = max(0, min(1, color.redComponent))
         green = max(0, min(1, color.greenComponent))
@@ -44,7 +46,7 @@ nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
     }
 
     func restored() throws -> CompositionSettings {
-        guard (headline ?? HeadlineSettings()).isValid, (effects ?? CompositionEffects()).isValid, ScreenshotPreset.all.contains(preset),
+        guard (desktop ?? DesktopSettings()).isValid, (headline ?? HeadlineSettings()).isValid, (effects ?? CompositionEffects()).isValid, ScreenshotPreset.all.contains(preset),
               (0...1).contains(deviceX ?? 0.5), (0...1).contains(deviceY ?? 0.5),
               (0.4...1).contains(deviceScale), [red, green, blue].allSatisfy({ (0...1).contains($0) }),
               (0...0.9).contains(screenX), (0...0.9).contains(screenY),
@@ -59,6 +61,7 @@ nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
         settings.transparentBackground = transparentBackground ?? false
         settings.effects = effects ?? CompositionEffects()
         settings.headline = headline ?? HeadlineSettings()
+        settings.desktop = desktop ?? DesktopSettings()
         settings.fillScreen = fillScreen; settings.manualScreen = manualScreen
         settings.screenX = screenX; settings.screenY = screenY
         settings.screenWidth = screenWidth; settings.screenHeight = screenHeight
