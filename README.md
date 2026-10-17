@@ -179,3 +179,14 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 ```
 
 Checks cover independent settings and frames, duplicate isolation, preserved headline text, ordering, clean selection changes, project roundtrips, version 1 migration, and invalid layout rejection.
+
+## Responsive project opening
+
+Open Project and Finder opens read and decode the document, eagerly decode embedded images, validate layouts, detect frame masks, and hash frame PNGs on a background executor. Library matching uses those embedded PNG hashes rather than re-encoding full-resolution frames. A native Opening Project sheet shows the current stage and offers Cancel. Cancellation is checked between image operations; the current canvas stays intact until preparation succeeds. Broken projects leave the current project and its dirty state unchanged.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/ProjectOpenChecks.swift -o /tmp/framed-open-checks
+/tmp/framed-open-checks /path/to/project-with-frames.framed
+```
+
+The checks measure main-actor responsiveness during opening and verify cancellation, layout preservation, library matching, concurrent-open rejection, source-file preservation, and atomic failure for corrupt JSON and embedded images. They use an isolated temporary frame library.

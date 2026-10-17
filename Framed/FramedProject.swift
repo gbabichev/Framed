@@ -6,7 +6,7 @@ extension UTType {
     static let framedProject = UTType(exportedAs: "com.georgebabichev.framed.project", conformingTo: .json)
 }
 
-struct ProjectSettings: Codable, Equatable {
+nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
     var preset: ScreenshotPreset
     var landscape: Bool
     var deviceScale: Double
@@ -93,25 +93,25 @@ nonisolated struct ProjectImage: Codable, Sendable {
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
               width > 0, height > 0, width <= 16000, height <= 16000, width * height <= 60_000_000,
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+              let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCache: true, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else {
             throw FramedError.message("The embedded image ‘\(name)’ is missing or invalid.")
         }
         return ImportedImage(id: id, name: name, image: image)
     }
 }
 
-struct ProjectScreenshotLayout: Codable, Equatable {
+nonisolated struct ProjectScreenshotLayout: Codable, Equatable, Sendable {
     var screenshotID: UUID
     var mockupID: UUID?
     var settings: ProjectSettings
 }
 
-struct ScreenshotLayout {
+nonisolated struct ScreenshotLayout: Sendable {
     var settings: CompositionSettings
     var mockupID: UUID?
 }
 
-struct FramedProject: Codable {
+nonisolated struct FramedProject: Codable, Sendable {
     var version = 2
     var screenshots: [ProjectImage]
     var mockups: [ProjectImage]
@@ -146,4 +146,73 @@ struct ProjectFingerprint: Equatable {
     var emptySettings: ProjectSettings?
     var emptyMockupID: UUID?
     var jpeg: Bool
+}
+
+/// Fully prepared away from the UI; publishing it only replaces in-memory state.
+nonisolated struct PreparedProject: Sendable {
+    let screenshots: [ImportedImage]
+    let mockups: [ImportedImage]
+    let openings: [UUID: ScreenOpening]
+    let frameDigests: [UUID: String]
+    let layouts: [UUID: ScreenshotLayout]
+    let settings: CompositionSettings
+    let selectedScreenshotID: UUID?
+    let selectedMockupID: UUID?
+    let jpeg: Bool
+}
+
+nonisolated enum ProjectFileWorker {
+    @concurrent
+    static func read(from url: URL, progress: @Sendable (String) async -> Void) async throws -> PreparedProject {
+        try Task.checkCancellation()
+        await progress("Reading project…")
+        let project = try autoreleasepool { try FramedProject.read(from: url) }
+        try Task.checkCancellation()
+        await progress("Preparing screenshots and device frames…")
+        return try autoreleasepool { try prepare(project) }
+    }
+
+    static func prepare(_ project: FramedProject) throws -> PreparedProject {
+        try Task.checkCancellation()
+        guard (1...2).contains(project.version) else { throw FramedError.message("Unsupported project version.") }
+        // Decode and validate everything before replacing the current canvas.
+        let restoredSettings = try project.settings.restored()
+        let shots = try project.screenshots.map { try Task.checkCancellation(); return try $0.restored() }
+        let frames = try project.mockups.map { try Task.checkCancellation(); return try $0.restored() }
+        let allIDs = (shots + frames).map(\.id)
+        guard Set(allIDs).count == allIDs.count,
+              project.selectedScreenshotID == nil || shots.contains(where: { $0.id == project.selectedScreenshotID }),
+              project.selectedMockupID == nil || frames.contains(where: { $0.id == project.selectedMockupID }) else {
+            throw FramedError.message("This project contains invalid image references.")
+        }
+        var restoredLayouts: [UUID: ScreenshotLayout] = [:]
+        if project.version == 2 {
+            guard let records = project.layouts, records.count == shots.count,
+                  Set(records.map(\.screenshotID)) == Set(shots.map(\.id)) else {
+                throw FramedError.message("This project contains missing or duplicate screenshot layouts.")
+            }
+            for record in records {
+                guard record.mockupID == nil || frames.contains(where: { $0.id == record.mockupID }) else {
+                    throw FramedError.message("A screenshot layout refers to a missing frame.")
+                }
+                restoredLayouts[record.screenshotID] = ScreenshotLayout(settings: try record.settings.restored(), mockupID: record.mockupID)
+            }
+        } else {
+            for shot in shots {
+                restoredLayouts[shot.id] = ScreenshotLayout(settings: restoredSettings, mockupID: project.selectedMockupID)
+            }
+        }
+        var detected: [UUID: ScreenOpening] = [:]
+        var digests: [UUID: String] = [:]
+        for (index, frame) in frames.enumerated() {
+            try Task.checkCancellation()
+            if let opening = ScreenOpening.detect(in: frame.image) { detected[frame.id] = opening }
+            digests[frame.id] = FrameFileWorker.digest(project.mockups[index].png)
+        }
+        try Task.checkCancellation()
+        return PreparedProject(screenshots: shots, mockups: frames, openings: detected, frameDigests: digests,
+                               layouts: restoredLayouts, settings: restoredSettings,
+                               selectedScreenshotID: project.selectedScreenshotID ?? shots.first?.id,
+                               selectedMockupID: project.selectedMockupID, jpeg: project.jpeg)
+    }
 }

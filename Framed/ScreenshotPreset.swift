@@ -1,7 +1,7 @@
 import Foundation
 import CoreGraphics
 
-struct ScreenshotPreset: Identifiable, Hashable, Codable {
+nonisolated struct ScreenshotPreset: Identifiable, Hashable, Codable, Sendable {
     let name: String
     let width: Int
     let height: Int

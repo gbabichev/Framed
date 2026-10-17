@@ -55,6 +55,11 @@ final class EditorModel {
     @ObservationIgnored weak var window: NSWindow?
     @ObservationIgnored private var hasProjectAccess = false
     var isPresentingProjectDialog = false
+    private(set) var isOpeningProject = false
+    private(set) var isCancellingProjectOpen = false
+    private(set) var openingProjectName = ""
+    private(set) var projectOpenMessage = ""
+    @ObservationIgnored private var projectOpenTask: Task<Void, Never>?
 
     init(frameLibrary: FrameLibrary = .shared) {
         self.frameLibrary = frameLibrary
@@ -164,51 +169,25 @@ final class EditorModel {
                           settings: ProjectSettings(settings), jpeg: jpeg, layouts: projectLayouts)
     }
 
+    /// Synchronous in-memory restore for checks. User-facing opens use requestOpenProject's background worker.
     func restoreProject(_ project: FramedProject, at url: URL) throws {
-        guard (1...2).contains(project.version) else { throw FramedError.message("Unsupported project version.") }
-        // Decode and validate everything before replacing the current canvas.
-        let restoredSettings = try project.settings.restored()
-        let shots = try project.screenshots.map { try $0.restored() }
-        let frames = try project.mockups.map { try $0.restored() }
-        let allIDs = (shots + frames).map(\.id)
-        guard Set(allIDs).count == allIDs.count,
-              project.selectedScreenshotID == nil || shots.contains(where: { $0.id == project.selectedScreenshotID }),
-              project.selectedMockupID == nil || frames.contains(where: { $0.id == project.selectedMockupID }) else {
-            throw FramedError.message("This project contains invalid image references.")
-        }
-        var restoredLayouts: [UUID: ScreenshotLayout] = [:]
-        if project.version == 2 {
-            guard let records = project.layouts, records.count == shots.count,
-                  Set(records.map(\.screenshotID)) == Set(shots.map(\.id)) else {
-                throw FramedError.message("This project contains missing or duplicate screenshot layouts.")
-            }
-            for record in records {
-                guard record.mockupID == nil || frames.contains(where: { $0.id == record.mockupID }) else {
-                    throw FramedError.message("A screenshot layout refers to a missing frame.")
-                }
-                restoredLayouts[record.screenshotID] = ScreenshotLayout(settings: try record.settings.restored(), mockupID: record.mockupID)
-            }
-        } else {
-            for shot in shots {
-                restoredLayouts[shot.id] = ScreenshotLayout(settings: restoredSettings, mockupID: project.selectedMockupID)
-            }
-        }
-        let detected = Dictionary(uniqueKeysWithValues: frames.compactMap { frame in
-            ScreenOpening.detect(in: frame.image).map { (frame.id, $0) }
-        })
-        screenshots = shots; mockups = frames; openings = detected
-        layouts = restoredLayouts; copiedStyle = nil
-        emptySettings = restoredSettings; emptyMockupID = project.selectedMockupID
-        selectedScreenshotID = project.selectedScreenshotID ?? shots.first?.id
+        applyPreparedProject(try ProjectFileWorker.prepare(project), at: url)
+    }
+
+    private func applyPreparedProject(_ project: PreparedProject, at url: URL) {
+        screenshots = project.screenshots; mockups = project.mockups; openings = project.openings
+        layouts = project.layouts; copiedStyle = nil
+        emptySettings = project.settings; emptyMockupID = project.selectedMockupID
+        selectedScreenshotID = project.selectedScreenshotID
         jpeg = project.jpeg
+        // Match the embedded PNG bytes directly, avoiding a full-resolution PNG re-encode.
+        // A removed global library frame is never recreated by opening a project.
+        libraryIDs = project.frameDigests.reduce(into: [:]) { result, entry in
+            result[entry.key] = frameLibrary.frames.first { $0.digest == entry.value }?.id
+        }
         adoptProjectURL(url)
         savedFingerprint = fingerprint
         status = "Opened \(url.lastPathComponent)."
-        libraryIDs = [:]
-        for frame in frames {
-            // Opening a project never resurrects a frame deliberately removed from the library.
-            libraryIDs[frame.id] = try? frameLibrary.matching(frame)?.id
-        }
     }
 
     private func adoptProjectURL(_ url: URL) {
@@ -269,15 +248,39 @@ final class EditorModel {
 
     func requestOpenProject(at url: URL) {
         guard !isBusy, !isPresentingProjectDialog else { return }
-        // Validate before asking to replace a working project.
-        do {
-            let project = try FramedProject.read(from: url)
-            confirmDiscardingChanges { [self] proceed in
-                guard proceed else { return }
-                do { try restoreProject(project, at: url) }
-                catch { self.error = error.localizedDescription }
+        confirmDiscardingChanges { [self] proceed in
+            guard proceed, !isBusy else { return }
+            let previousStatus = status
+            isBusy = true; isOpeningProject = true; isCancellingProjectOpen = false
+            openingProjectName = url.lastPathComponent
+            projectOpenMessage = "Reading project…"
+            status = "Opening \(url.lastPathComponent)…"
+            projectOpenTask = Task { @MainActor [self] in
+                defer {
+                    self.isBusy = false; self.isOpeningProject = false; self.isCancellingProjectOpen = false
+                    self.projectOpenTask = nil
+                }
+                do {
+                    let prepared = try await ProjectFileWorker.read(from: url) { [self] message in
+                        await MainActor.run { if !self.isCancellingProjectOpen { self.projectOpenMessage = message } }
+                    }
+                    try Task.checkCancellation()
+                    self.applyPreparedProject(prepared, at: url)
+                } catch is CancellationError {
+                    self.status = previousStatus
+                } catch {
+                    self.status = previousStatus
+                    self.error = error.localizedDescription
+                }
             }
-        } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    func cancelProjectOpen() {
+        guard isOpeningProject else { return }
+        isCancellingProjectOpen = true
+        projectOpenMessage = "Stopping after the current image…"
+        projectOpenTask?.cancel()
     }
 
     func confirmDiscardingChanges(completion: @escaping (Bool) -> Void) {

@@ -162,7 +162,7 @@ nonisolated struct ScreenOpening: Sendable {
     }
 }
 
-enum GlowCorner: String, Codable, CaseIterable, Identifiable {
+nonisolated enum GlowCorner: String, Codable, CaseIterable, Identifiable, Sendable {
     case topLeft, topRight, bottomLeft, bottomRight
     var id: Self { self }
     var title: String {
@@ -179,13 +179,13 @@ enum GlowCorner: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum DeviceFadeEdge: String, Codable, CaseIterable, Identifiable {
+nonisolated enum DeviceFadeEdge: String, Codable, CaseIterable, Identifiable, Sendable {
     case top, bottom
     var id: Self { self }
     var title: String { self == .top ? "Top" : "Bottom" }
 }
 
-struct CompositionEffects: Codable, Equatable {
+nonisolated struct CompositionEffects: Codable, Equatable, Sendable {
     var cornerGlow = false
     var glowCorner = GlowCorner.topLeft
     var glowRed = 0.98
@@ -211,7 +211,7 @@ struct CompositionEffects: Codable, Equatable {
     }
 }
 
-enum HeadlineWeight: String, Codable, CaseIterable, Identifiable {
+nonisolated enum HeadlineWeight: String, Codable, CaseIterable, Identifiable, Sendable {
     case regular, medium, semibold, bold
     var id: Self { self }
     var title: String { rawValue.capitalized }
@@ -225,7 +225,7 @@ enum HeadlineWeight: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct HeadlineSettings: Codable, Equatable {
+nonisolated struct HeadlineSettings: Codable, Equatable, Sendable {
     var enabled = false
     var firstLine = "Your headline"
     var secondLine = ""
@@ -331,7 +331,7 @@ nonisolated enum CenterSnapping {
     }
 }
 
-struct CompositionSettings {
+nonisolated struct CompositionSettings: Sendable {
     var preset = ScreenshotPreset.all[0]
     var landscape = false
     var deviceScale = 0.88

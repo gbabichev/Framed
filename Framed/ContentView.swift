@@ -59,9 +59,37 @@ struct ContentView: View {
             FrameImportProgress(model: model, library: model.frameLibrary)
                 .environment(\.isEnabled, true)
         }
+        .sheet(isPresented: Binding(get: { model.isOpeningProject }, set: { _ in })) {
+            ProjectOpenProgress(model: model)
+                .environment(\.isEnabled, true)
+        }
         .alert("Couldn’t complete the operation", isPresented: Binding(get: { model.error != nil && !exportPresented }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
+    }
+}
+
+private struct ProjectOpenProgress: View {
+    let model: EditorModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(model.isCancellingProjectOpen ? "Stopping…" : "Opening Project")
+                .font(.headline)
+            Text(model.openingProjectName).lineLimit(1).truncationMode(.middle)
+            HStack(spacing: 12) {
+                ProgressView().controlSize(.small)
+                Text(model.projectOpenMessage).font(.callout).foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { model.cancelProjectOpen() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.isCancellingProjectOpen)
+            }
+        }
+        .padding(24)
+        .frame(width: 400)
+        .interactiveDismissDisabled()
     }
 }
 
