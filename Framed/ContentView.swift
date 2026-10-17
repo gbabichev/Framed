@@ -35,6 +35,20 @@ struct ContentView: View {
         .focusedSceneValue(\.projectModel, model)
         .background(ProjectWindowState(model: model, isEdited: model.isDirty, projectURL: model.projectURL).frame(width: 0, height: 0))
         .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button { model.openProject() } label: {
+                    Label("Open Project", systemImage: "folder")
+                }
+                .labelStyle(.iconOnly)
+                .help("Open Project (Command-O)")
+                .disabled(model.isBusy || model.isPresentingProjectDialog)
+                Button { model.saveProject() } label: {
+                    Label("Save Project", systemImage: "tray.and.arrow.down")
+                }
+                .labelStyle(.iconOnly)
+                .help("Save Project (Command-S)")
+                .disabled(model.isBusy || model.isPresentingProjectDialog)
+            }
             ToolbarItemGroup {
                 Button { exportPresented = true } label: { Label("Export", systemImage: "square.and.arrow.up") }
                     .keyboardShortcut("e", modifiers: .command)
