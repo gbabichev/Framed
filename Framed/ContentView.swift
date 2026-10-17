@@ -656,7 +656,7 @@ private struct MockupSettings: View {
             Button { model.isShowingFrameLibrary = true } label: {
                 HStack(spacing: 12) {
                     FrameThumbnail(image: model.selectedMockup?.image)
-                        .frame(width: 48, height: 64)
+                        .frame(width: 72, height: 64)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(model.selectedMockup == nil ? "Choose a frame…" : "Change frame…")
                         Text("\(model.frameLibrary.frames.count) saved frames")

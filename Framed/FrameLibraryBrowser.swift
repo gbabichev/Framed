@@ -7,7 +7,15 @@ struct FrameThumbnail: View {
         ZStack {
             RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.4))
             if let image {
-                Image(decorative: image, scale: 1).resizable().scaledToFit().padding(8)
+                GeometryReader { geometry in
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: max(1, geometry.size.width - 16),
+                               height: max(1, geometry.size.height - 16))
+                        .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                }
             } else {
                 Image(systemName: "rectangle.dashed").font(.title2).foregroundStyle(.secondary)
             }
