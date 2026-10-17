@@ -5,6 +5,8 @@ struct ContentView: View {
     @State private var model = EditorModel()
     @State private var inspectorPresented = true
     @State private var exportPresented = false
+    @State private var canvasZoom = CanvasZoom.fit
+    @State private var panCanvas = false
 
     var body: some View {
         NavigationSplitView {
@@ -22,7 +24,7 @@ struct ContentView: View {
                 }
         } detail: {
             HSplitView {
-                PreviewPane(model: model)
+                PreviewPane(model: model, zoom: canvasZoom, panEnabled: panCanvas)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 if inspectorPresented {
                     InspectorPane(model: model)
@@ -51,6 +53,24 @@ struct ContentView: View {
                 .disabled(model.isBusy || model.isPresentingProjectDialog)
             }
             ToolbarItemGroup {
+                Menu {
+                    Picker("Canvas zoom", selection: $canvasZoom) {
+                        ForEach(CanvasZoom.allCases) { zoom in Text(zoom.title).tag(zoom) }
+                    }.pickerStyle(.inline)
+                    Divider()
+                    Button("Fit Canvas") { canvasZoom = .fit }
+                        .keyboardShortcut("0", modifiers: .command)
+                } label: {
+                    Label(canvasZoom.title, systemImage: "magnifyingglass")
+                }
+                .labelStyle(.titleAndIcon)
+                .help("Canvas zoom. 100% shows one image pixel per display pixel. Command-0 fits the canvas.")
+                Toggle(isOn: $panCanvas) { Label("Pan Canvas", systemImage: "hand.draw") }
+                    .toggleStyle(.button)
+                    .labelStyle(.iconOnly)
+                    .help(canvasZoom == .fit ? "Choose a zoom level to pan the canvas. Fit always shows the entire canvas."
+                      : "Drag to pan the canvas. Turn off to move the device or headline. You can also scroll with a trackpad or the scroll bars.")
+                .disabled(canvasZoom == .fit)
                 Button { exportPresented = true } label: { Label("Export", systemImage: "square.and.arrow.up") }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(!model.canExport && !model.canExportAll)
@@ -63,6 +83,9 @@ struct ContentView: View {
             }
         }
         .disabled(model.isBusy)
+        .onChange(of: canvasZoom) { _, value in
+            if value == .fit { panCanvas = false }
+        }
         .sheet(isPresented: $exportPresented) {
             ExportDialog(model: model)
                 .environment(\.isEnabled, true)
@@ -256,15 +279,24 @@ private struct ScreenshotThumbnail: View {
 }
 
 private struct PreviewPane: View {
+    @Environment(\.displayScale) private var displayScale
     @Bindable var model: EditorModel
+    let zoom: CanvasZoom
+    let panEnabled: Bool
     var body: some View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
                 if model.selectedScreenshot != nil || model.selectedMockup != nil {
-                    CompositionPreview(screenshot: model.selectedScreenshot?.image, mockup: model.selectedMockup?.image, opening: model.opening,
-                                       settings: $model.settings, forceOpaque: model.jpeg)
-                        .frame(width: max(1, geometry.size.width - 72), height: max(1, geometry.size.height - 48))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    let size = zoom.size(canvas: model.settings.outputSize, viewport: geometry.size, displayScale: displayScale)
+                    CanvasScroller(fit: zoom == .fit, panEnabled: panEnabled) {
+                        CompositionPreview(screenshot: model.selectedScreenshot?.image, mockup: model.selectedMockup?.image,
+                                           opening: model.opening, settings: $model.settings, forceOpaque: model.jpeg)
+                            .frame(width: size.width, height: size.height)
+                            .padding(.horizontal, 36).padding(.vertical, 24)
+                            .frame(width: max(geometry.size.width, size.width + 72),
+                                   height: max(geometry.size.height, size.height + 48))
+                    }
+                    .id("\(zoom.rawValue)-\(Int(model.settings.outputSize.width))x\(Int(model.settings.outputSize.height))")
                 } else {
                     EmptyCanvas()
                         .frame(width: geometry.size.width, height: geometry.size.height)
@@ -272,11 +304,85 @@ private struct PreviewPane: View {
             }
             HStack {
                 if model.isBusy { ProgressView().controlSize(.small) }
-                Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(panEnabled ? "Drag to pan. Turn off the hand tool to edit the layout." : model.status)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
 
             }.padding(14)
         }.background(.primary.opacity(0.035))
+    }
+}
+
+private struct CanvasScroller<Content: View>: View {
+    let fit: Bool
+    let panEnabled: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if fit {
+            // Fit is a fixed, centered view. No native scroll offset can survive here.
+            content.clipped()
+        } else {
+            ScrollView([.horizontal, .vertical]) {
+                content.overlay {
+                    if panEnabled {
+                        CanvasPanSurface()
+                            .accessibilityLabel("Pan canvas")
+                            .accessibilityHint("Drag to move the viewport without changing the layout")
+                    }
+                }
+            }
+            .defaultScrollAnchor(.center)
+            .clipped()
+        }
+    }
+}
+
+private struct CanvasPanSurface: NSViewRepresentable {
+    func makeNSView(context: Context) -> CanvasPanView { CanvasPanView() }
+    func updateNSView(_ view: CanvasPanView, context: Context) { }
+}
+
+private final class CanvasPanView: NSView {
+    private var start: CGPoint?
+    private var scrollOrigin = CGPoint.zero
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .openHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let scroll = enclosingScrollView else { return }
+        start = event.locationInWindow
+        scrollOrigin = scroll.contentView.bounds.origin
+        NSCursor.closedHand.set()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start, let scroll = enclosingScrollView, let document = scroll.documentView else { return }
+        let delta = CGSize(width: event.locationInWindow.x - start.x, height: event.locationInWindow.y - start.y)
+        let viewport = scroll.contentView
+        let horizontal = document.frame.width > viewport.bounds.width + 0.5
+        let vertical = document.frame.height > viewport.bounds.height + 0.5
+        guard horizontal || vertical else { return }
+        let proposed = CGRect(origin: CGPoint(
+            x: horizontal ? scrollOrigin.x - delta.width : scrollOrigin.x,
+            y: vertical ? scrollOrigin.y + (document.isFlipped ? delta.height : -delta.height) : scrollOrigin.y),
+            size: viewport.bounds.size)
+        // Hosting views can have nonzero origins. Let AppKit constrain its own
+        // coordinates, and leave axes with no scrollable content exactly in place.
+        var point = viewport.constrainBoundsRect(proposed).origin
+        if !horizontal { point.x = scrollOrigin.x }
+        if !vertical { point.y = scrollOrigin.y }
+        viewport.scroll(to: point)
+        scroll.reflectScrolledClipView(viewport)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        start = nil
+        NSCursor.openHand.set()
     }
 }
 

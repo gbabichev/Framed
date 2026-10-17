@@ -342,6 +342,20 @@ nonisolated enum CenterSnapping {
     }
 }
 
+nonisolated enum CanvasZoom: Double, CaseIterable, Identifiable, Sendable {
+    case fit = 0, quarter = 25, half = 50, threeQuarter = 75, actual = 100, oneAndHalf = 150, double = 200, quadruple = 400
+    var id: Self { self }
+    var title: String { self == .fit ? "Fit" : "\(Int(rawValue))%" }
+
+    func size(canvas: CGSize, viewport: CGSize, displayScale: CGFloat) -> CGSize {
+        guard canvas.width > 0, canvas.height > 0, displayScale > 0 else { return CGSize(width: 1, height: 1) }
+        let factor = self == .fit
+            ? min(max(1, viewport.width - 72) / canvas.width, max(1, viewport.height - 48) / canvas.height)
+            : rawValue / 100 / displayScale
+        return CGSize(width: canvas.width * factor, height: canvas.height * factor)
+    }
+}
+
 nonisolated enum PreviewResolution {
     /// Render one source pixel per display pixel for the aspect-fitted canvas.
     static func maxDimension(canvas: CGSize, viewport: CGSize, displayScale: CGFloat) -> Double {
