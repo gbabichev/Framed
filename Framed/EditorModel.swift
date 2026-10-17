@@ -368,27 +368,31 @@ final class EditorModel {
         if selectedScreenshotID == id { selectedScreenshotID = screenshots.first?.id }
     }
 
-    func exportSelected() {
-        guard let screenshot = selectedScreenshot, canExport else { return }
+    @discardableResult
+    func exportSelected() -> Bool {
+        guard let screenshot = selectedScreenshot, canExport else { return false }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [jpeg ? .jpeg : .png]
         panel.nameFieldStringValue = "\(screenshot.name)-framed.\(jpeg ? "jpg" : "png")"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
         do {
             let image = try CompositionRenderer.render(screenshot: screenshot.image, mockup: selectedMockup?.image, opening: opening, settings: settings, forceOpaque: jpeg)
             try CompositionRenderer.encode(image, jpeg: jpeg).write(to: url, options: .atomic)
             status = "Saved \(url.lastPathComponent)."
-        } catch { self.error = error.localizedDescription }
+            return true
+        } catch { self.error = error.localizedDescription; return false }
     }
 
-    func exportAll() {
-        guard canExport else { return }
+    @discardableResult
+    func exportAll() -> Bool {
+        guard canExport else { return false }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true
         panel.prompt = "Export here"
         panel.message = "A new folder will be created for this export. Every screenshot uses the current frame and layout."
-        guard panel.runModal() == .OK, let directory = panel.url else { return }
+        guard panel.runModal() == .OK, let directory = panel.url else { return false }
         isBusy = true
+        status = "Exporting \(screenshots.count) screenshots…"
         // Yield between images so progress and window events remain responsive.
         Task { @MainActor in
             let folder = directory.appendingPathComponent("Framed-\(UUID().uuidString.prefix(8))", isDirectory: true)
@@ -410,5 +414,6 @@ final class EditorModel {
                 NSWorkspace.shared.activateFileViewerSelecting([folder])
             } catch { self.error = "Export stopped after \(count) files. \(error.localizedDescription)" }
         }
+        return true
     }
 }

@@ -7,7 +7,7 @@ A native SwiftUI macOS app for placing device screenshots inside your own transp
 2. Add screenshots from your simulator or real device. Multiple images can be imported together.
 3. Open the visual Frame Library in the inspector, import front-facing PNG mockups, and choose a thumbnail. The largest enclosed transparent screen opening is detected automatically; camera cutouts remain visible.
 4. Choose an Export Canvas size, background, scale, and Fit or Fill. When a frame has a detected or manually calibrated screen, Use Suggested Canvas offers a supported size based on its screen proportions and pixel dimensions. Applying it is optional; selecting a frame keeps your existing canvas. The frame keeps its orientation. Check the preview and any aspect-ratio or enlargement warnings.
-5. Export one screenshot or export the entire list into a new folder using the same layout.
+5. Click Export in the toolbar (⌘E) to open the export sheet. Review the preview, choose PNG or JPEG and the PNG transparency option, then export the selected screenshot or all screenshots. The final Export button opens a native destination picker; batch exports create a new folder using the same layout.
 
 Exports use sRGB at the selected pixel dimensions. In Appearance, enable Transparent background to export a PNG with alpha; the preview shows a checkerboard that is not included in the file. JPEG always uses the selected background color. Transparency is saved with the project. App Store uploads require an opaque background, so turn transparency off for those exports. The app uses user-selected file access and processes images locally. Use File → Save Project (⌘S), Save Project As (⇧⌘S), and Open Project (⌘O) to continue work later. The `.framed` project embeds screenshots and mockups along with the canvas settings, so it can be moved without its source images. Canvas edits show the native dirty-window indicator. Closing a dirty window or quitting offers Save, Don’t Save, and Cancel; cancelling or failing a save preserves your work. Exporting images does not save the project.
 
@@ -153,3 +153,5 @@ Enabling the headline shifts a centered device down by 4% of the canvas height, 
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/DevicePositionChecks.swift -o /tmp/framed-position-checks
 /tmp/framed-position-checks
 ```
+
+The export sheet stays open after saving, shows completion or batch progress, and provides Done to close it. Canceling the destination picker returns to the settings. Frame import remains available in the Device frame card and Frame Library.

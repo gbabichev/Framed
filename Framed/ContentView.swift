@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var model = EditorModel()
     @State private var inspectorPresented = true
+    @State private var exportPresented = false
 
     var body: some View {
         NavigationSplitView {
@@ -34,8 +35,7 @@ struct ContentView: View {
         .background(ProjectWindowState(model: model, isEdited: model.isDirty, projectURL: model.projectURL).frame(width: 0, height: 0))
         .toolbar {
             ToolbarItemGroup {
-                Button { model.importImages(mockups: true) } label: { Label("Add mockups", systemImage: "iphone") }
-                Button { model.exportSelected() } label: { Label("Export", systemImage: "square.and.arrow.up") }
+                Button { exportPresented = true } label: { Label("Export", systemImage: "square.and.arrow.up") }
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(!model.canExport)
             }
@@ -47,6 +47,10 @@ struct ContentView: View {
             }
         }
         .disabled(model.isBusy)
+        .sheet(isPresented: $exportPresented) {
+            ExportDialog(model: model)
+                .environment(\.isEnabled, true)
+        }
         .sheet(isPresented: $model.isShowingFrameLibrary) {
             FrameLibraryBrowser(model: model, library: model.frameLibrary)
         }
@@ -54,7 +58,7 @@ struct ContentView: View {
             FrameImportProgress(model: model, library: model.frameLibrary)
                 .environment(\.isEnabled, true)
         }
-        .alert("Couldn’t complete the operation", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+        .alert("Couldn’t complete the operation", isPresented: Binding(get: { model.error != nil && !exportPresented }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
     }
@@ -129,12 +133,6 @@ private struct PreviewPane: View {
     @Bindable var model: EditorModel
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Label("Canvas", systemImage: "rectangle.inset.filled").font(.headline)
-                Spacer()
-                Text("\(Int(model.settings.outputSize.width)) × \(Int(model.settings.outputSize.height)) px")
-                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-            }.padding(20)
             GeometryReader { geometry in
                 if let shot = model.selectedScreenshot {
                     CompositionPreview(screenshot: shot.image, mockup: model.selectedMockup?.image, opening: model.opening,
@@ -410,11 +408,6 @@ private struct InspectorPane: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
-            InspectorCard("Export", systemImage: "square.and.arrow.up") {
-                ExportSettings(model: model)
-            }
-            .padding(16)
         }
         .controlSize(.small)
         .background(.background)
@@ -702,27 +695,105 @@ private struct ValueSlider: View {
     }
 }
 
-private struct ExportSettings: View {
+private struct ExportDialog: View {
     @Bindable var model: EditorModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var exportAll = false
+    @State private var showsStatus = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Picker("Format", selection: $model.jpeg) {
-                Text("PNG").tag(false)
-                Text("JPEG").tag(true)
-            }.pickerStyle(.segmented)
+        VStack(spacing: 0) {
             HStack {
-                Button("Export…") { model.exportSelected() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.canExport)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Export Screenshots").font(.title2.bold())
+                    Text("Choose your settings, then select where to save.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button("Export all…") { model.exportAll() }
-                    .disabled(!model.canExport || model.screenshots.isEmpty)
-            }
-            Text(model.settings.transparentBackground
-                 ? (model.jpeg ? "JPEG uses the background color; transparency requires PNG."
-                    : "Transparent PNG · For editing; App Store uploads require an opaque background.")
-                 : "Opaque sRGB · App Store dimensions")
-                .font(.caption2).foregroundStyle(.secondary)
+            }.padding(20)
+            Divider()
+            HStack(alignment: .top, spacing: 24) {
+                ExportPreview(model: model)
+                    .frame(width: 260).frame(maxHeight: .infinity)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        InspectorCard("Export settings", systemImage: "square.and.arrow.up") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Format")
+                                Picker("Format", selection: $model.jpeg) {
+                                    Text("PNG").tag(false)
+                                    Text("JPEG").tag(true)
+                                }.pickerStyle(.segmented).labelsHidden()
+                                InspectorSwitch("Transparent PNG background", isOn: $model.settings.transparentBackground)
+                                    .disabled(model.jpeg)
+                                Text(model.jpeg ? "JPEG uses the background color selected in Appearance."
+                                     : model.settings.transparentBackground ? "Transparency is preserved. App Store uploads require an opaque background."
+                                     : "Opaque sRGB PNG at the selected canvas dimensions.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        InspectorCard("Screenshots", systemImage: "photo.on.rectangle") {
+                            Picker("Screenshots to export", selection: $exportAll) {
+                                Text("Selected screenshot").tag(false)
+                                Text("All screenshots (\(model.screenshots.count))").tag(true)
+                            }.pickerStyle(.radioGroup).labelsHidden()
+                            Text(exportAll ? "Every screenshot uses the current frame, headline, and layout. A new folder will be created."
+                                 : model.selectedScreenshot?.name ?? "No screenshot selected")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        LabeledContent("Canvas", value: "\(Int(model.settings.outputSize.width)) × \(Int(model.settings.outputSize.height)) px")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .disabled(model.isBusy)
+                }
+            }.padding(20)
+            Divider()
+            HStack(spacing: 12) {
+                if model.isBusy { ProgressView().controlSize(.small) }
+                if showsStatus {
+                    Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer()
+                Button(showsStatus ? "Done" : "Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.isBusy)
+                Button(exportAll ? "Export All…" : "Export…") {
+                    let started = exportAll ? model.exportAll() : model.exportSelected()
+                    if started { showsStatus = true }
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!model.canExport)
+            }.padding(16)
         }
+        .frame(width: 720, height: 580)
+        .interactiveDismissDisabled(model.isBusy)
+        .alert("Export failed", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+            Button("OK") { model.error = nil }
+        } message: { Text(model.error ?? "") }
+    }
+}
+
+private struct ExportPreview: View {
+    let model: EditorModel
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if let shot = model.selectedScreenshot,
+               let image = try? CompositionRenderer.render(screenshot: shot.image, mockup: model.selectedMockup?.image,
+                                                           opening: model.opening, settings: model.settings,
+                                                           maxDimension: 800, forceOpaque: model.jpeg) {
+                ZStack {
+                    if model.settings.transparentBackground && !model.jpeg { TransparencyGrid() }
+                    Image(decorative: image, scale: 1).resizable()
+                }
+                .aspectRatio(CGFloat(image.width) / CGFloat(image.height), contentMode: .fit)
+                .accessibilityLabel("Export preview")
+            }
+            Text("Preview").font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
