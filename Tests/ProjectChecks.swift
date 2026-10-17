@@ -37,6 +37,12 @@ struct ProjectChecks {
         model.settings.screenWidth = 0.71; model.settings.screenHeight = 0.72
         model.settings.cornerRadius = 0.15
         model.settings.transparentBackground = true
+        model.settings.effects.cornerGlow = true
+        model.settings.effects.glowCorner = .bottomRight
+        model.settings.effects.glowStrength = 0.42
+        model.settings.effects.deviceFade = true
+        model.settings.effects.fadeEdge = .top
+        model.settings.effects.fadeDepth = 0.27
         model.jpeg = true
         let expected = model.fingerprint
         let selected = model.selectedScreenshotID
@@ -57,6 +63,10 @@ struct ProjectChecks {
         precondition(reopened.isDirty, "Background changes must dirty project")
         reopened.settings.transparentBackground = true
         precondition(!reopened.isDirty, "Restoring saved background must clear dirty state")
+        reopened.settings.effects.cornerGlow = false
+        precondition(reopened.isDirty, "Effect changes must dirty project")
+        reopened.settings.effects.cornerGlow = true
+        precondition(!reopened.isDirty, "Restoring saved effects must clear dirty state")
         reopened.status = "Transient status"; reopened.error = "Transient error"
         precondition(!reopened.isDirty, "Status/error must not dirty project")
         reopened.selectedScreenshotID = nil

@@ -122,3 +122,12 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 ```
 
 Detection uses a bounded analysis image, while clipping is refined from source alpha up to 4,096 pixels per side. Clipping extends beneath the opaque bezel so the source PNG supplies antialiased corners and camera cutouts. The pixel checks use a large synthetic frame to catch coarse-mask stair-stepping.
+
+## Optional effects
+
+The inspector’s Effects section offers Corner glow (color, corner, strength and size) and Device fade (top or bottom, depth and strength). Both default to off. The glow is drawn behind the device; the fade blends the screenshot and bezel together into the canvas background. With a transparent PNG, the fade reduces alpha and the glow remains translucent. JPEG composites the same effects onto the chosen background color. Effects are included in project files, dirty tracking, previews, and individual or batch exports. Older projects open with effects off.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/EffectsChecks.swift -o /tmp/framed-effects-checks
+/tmp/framed-effects-checks
+```

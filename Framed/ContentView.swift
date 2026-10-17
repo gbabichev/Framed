@@ -237,6 +237,8 @@ private struct InspectorPane: View {
                     MockupSettings(model: model)
                     Divider()
                     LayoutSettings(settings: $model.settings)
+                    Divider()
+                    EffectsSettings(effects: $model.settings.effects)
                     if !model.warnings.isEmpty {
                         ForEach(model.warnings, id: \.self) { warning in
                             Label(warning, systemImage: "exclamationmark.triangle")
@@ -416,6 +418,43 @@ private struct LayoutSettings: View {
                  : "Fit shows the whole screenshot. Different proportions leave black bars inside the device.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private extension CompositionEffects {
+    var pickerColor: Color {
+        get { Color(nsColor: glowColor) }
+        set { glowColor = NSColor(newValue) }
+    }
+}
+
+private struct EffectsSettings: View {
+    @Binding var effects: CompositionEffects
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Effects").font(.headline)
+            Toggle("Corner glow", isOn: $effects.cornerGlow)
+            if effects.cornerGlow {
+                ColorPicker("Glow color", selection: $effects.pickerColor, supportsOpacity: false)
+                Picker("Corner", selection: $effects.glowCorner) {
+                    ForEach(GlowCorner.allCases) { Text($0.title).tag($0) }
+                }
+                ValueSlider(title: "Glow strength", value: $effects.glowStrength, range: 0...1)
+                ValueSlider(title: "Glow size", value: $effects.glowSpread, range: 0.2...1.5)
+            }
+            Toggle("Device fade", isOn: $effects.deviceFade)
+            if effects.deviceFade {
+                Picker("Fade edge", selection: $effects.fadeEdge) {
+                    ForEach(DeviceFadeEdge.allCases) { Text($0.title).tag($0) }
+                }
+                ValueSlider(title: "Fade depth", value: $effects.fadeDepth, range: 0.1...0.8)
+                ValueSlider(title: "Fade strength", value: $effects.fadeStrength, range: 0...1)
+                Text("Fades the screenshot and frame together into the background, or into transparency for transparent PNGs.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

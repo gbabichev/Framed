@@ -161,12 +161,62 @@ nonisolated struct ScreenOpening: Sendable {
     }
 }
 
+enum GlowCorner: String, Codable, CaseIterable, Identifiable {
+    case topLeft, topRight, bottomLeft, bottomRight
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .topLeft: "Top left"
+        case .topRight: "Top right"
+        case .bottomLeft: "Bottom left"
+        case .bottomRight: "Bottom right"
+        }
+    }
+    func point(in size: CGSize) -> CGPoint {
+        CGPoint(x: self == .topRight || self == .bottomRight ? size.width : 0,
+                y: self == .topLeft || self == .topRight ? size.height : 0)
+    }
+}
+
+enum DeviceFadeEdge: String, Codable, CaseIterable, Identifiable {
+    case top, bottom
+    var id: Self { self }
+    var title: String { self == .top ? "Top" : "Bottom" }
+}
+
+struct CompositionEffects: Codable, Equatable {
+    var cornerGlow = false
+    var glowCorner = GlowCorner.topLeft
+    var glowRed = 0.98
+    var glowGreen = 0.76
+    var glowBlue = 0.68
+    var glowStrength = 0.65
+    var glowSpread = 0.85
+    var deviceFade = false
+    var fadeEdge = DeviceFadeEdge.bottom
+    var fadeDepth = 0.35
+    var fadeStrength = 1.0
+
+    var glowColor: NSColor {
+        get { NSColor(srgbRed: glowRed, green: glowGreen, blue: glowBlue, alpha: 1) }
+        set {
+            guard let color = newValue.usingColorSpace(.sRGB) else { return }
+            glowRed = color.redComponent; glowGreen = color.greenComponent; glowBlue = color.blueComponent
+        }
+    }
+    var isValid: Bool {
+        [glowRed, glowGreen, glowBlue, glowStrength, fadeStrength].allSatisfy { (0...1).contains($0) }
+            && (0.2...1.5).contains(glowSpread) && (0.1...0.8).contains(fadeDepth)
+    }
+}
+
 struct CompositionSettings {
     var preset = ScreenshotPreset.all[0]
     var landscape = false
     var deviceScale = 0.88
     var background = NSColor(srgbRed: 0.92, green: 0.94, blue: 0.98, alpha: 1)
     var transparentBackground = false
+    var effects = CompositionEffects()
     var fillScreen = false
     var manualScreen = false
     var screenX = 0.05
@@ -232,6 +282,43 @@ enum CompositionRenderer {
             context.setFillColor(settings.background.withAlphaComponent(1).cgColor)
             context.fill(CGRect(origin: .zero, size: size))
         }
+        drawCornerGlow(in: context, size: size, effects: settings.effects)
+        if settings.effects.deviceFade {
+            guard let layer = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
+                                        bitsPerComponent: 8, bytesPerRow: 0,
+                                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                throw FramedError.message("Could not allocate the device effect layer.")
+            }
+            layer.interpolationQuality = .high
+            try drawForeground(screenshot: screenshot, mockup: mockup, opening: opening,
+                               settings: settings, size: size, context: layer)
+            let device: CGRect
+            if mockup == nil && settings.fillScreen {
+                device = CGRect(x: size.width * (1 - settings.deviceScale) / 2,
+                                y: size.height * (1 - settings.deviceScale) / 2,
+                                width: size.width * settings.deviceScale, height: size.height * settings.deviceScale)
+            } else {
+                device = deviceRect(image: mockup ?? screenshot, canvas: size, scale: settings.deviceScale)
+            }
+            guard let foreground = layer.makeImage(),
+                  let mask = fadeMask(size: size, device: device, effects: settings.effects) else {
+                throw FramedError.message("Could not render the device fade.")
+            }
+            context.saveGState()
+            context.clip(to: CGRect(origin: .zero, size: size), mask: mask)
+            context.draw(foreground, in: CGRect(origin: .zero, size: size))
+            context.restoreGState()
+        } else {
+            try drawForeground(screenshot: screenshot, mockup: mockup, opening: opening,
+                               settings: settings, size: size, context: context)
+        }
+        guard let result = context.makeImage() else { throw FramedError.message("Could not render the composition.") }
+        return result
+    }
+
+    private static func drawForeground(screenshot: CGImage, mockup: CGImage?, opening: ScreenOpening?,
+                                       settings: CompositionSettings, size: CGSize, context: CGContext) throws {
         if let mockup {
             let device = deviceRect(image: mockup, canvas: size, scale: settings.deviceScale)
             guard settings.manualScreen || opening != nil else {
@@ -260,8 +347,34 @@ enum CompositionRenderer {
                                 width: size.width * settings.deviceScale, height: size.height * settings.deviceScale)
             draw(screenshot, in: target, fill: settings.fillScreen, context: context)
         }
-        guard let result = context.makeImage() else { throw FramedError.message("Could not render the composition.") }
-        return result
+    }
+
+    private static func drawCornerGlow(in context: CGContext, size: CGSize, effects: CompositionEffects) {
+        guard effects.cornerGlow, effects.glowStrength > 0 else { return }
+        let colors = [effects.glowColor.withAlphaComponent(effects.glowStrength).cgColor,
+                      effects.glowColor.withAlphaComponent(effects.glowStrength * 0.3).cgColor,
+                      effects.glowColor.withAlphaComponent(0).cgColor]
+        guard let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                                        colors: colors as CFArray, locations: [0, 0.5, 1]) else { return }
+        let origin = effects.glowCorner.point(in: size)
+        context.drawRadialGradient(gradient, startCenter: origin, startRadius: 0,
+                                   endCenter: origin, endRadius: hypot(size.width, size.height) * effects.glowSpread,
+                                   options: [.drawsAfterEndLocation])
+    }
+
+    private static func fadeMask(size: CGSize, device: CGRect, effects: CompositionEffects) -> CGImage? {
+        guard let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
+                                      bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceGray(),
+                                      bitmapInfo: CGImageAlphaInfo.none.rawValue),
+              let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceGray(),
+                                        colors: [CGColor(gray: 1, alpha: 1), CGColor(gray: 1 - effects.fadeStrength, alpha: 1)] as CFArray,
+                                        locations: [0, 1]) else { return nil }
+        let top = effects.fadeEdge == .top
+        let end = top ? device.maxY : device.minY
+        let start = end + (top ? -1 : 1) * device.height * effects.fadeDepth
+        context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: start), end: CGPoint(x: 0, y: end),
+                                   options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        return context.makeImage()
     }
 
     private static func draw(_ image: CGImage, in rect: CGRect, fill: Bool, context: CGContext) {
