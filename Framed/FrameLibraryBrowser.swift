@@ -1,6 +1,73 @@
 import SwiftUI
 import AppKit
 
+/// A native search control without recent-search or text-completion popups.
+private struct FrameSearchField: NSViewRepresentable {
+    @Binding var text: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = "Search frames"
+        field.maximumRecents = 0
+        field.recentsAutosaveName = nil
+        field.searchMenuTemplate = nil
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.searchChanged(_:))
+        field.setAccessibilityLabel("Search frames")
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    static func dismantleNSView(_ field: NSSearchField, coordinator: Coordinator) {
+        coordinator.restoreCompletion()
+        field.delegate = nil
+        field.target = nil
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+        private weak var editor: NSTextView?
+        private var completion: Bool?
+        private var prediction: NSTextInputTraitType?
+
+        init(text: Binding<String>) { self.text = text }
+
+        @objc func searchChanged(_ sender: NSSearchField) { text.wrappedValue = sender.stringValue }
+
+        func controlTextDidChange(_ notification: Notification) {
+            if let field = notification.object as? NSSearchField { searchChanged(field) }
+        }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField,
+                  let editor = field.currentEditor() as? NSTextView else { return }
+            self.editor = editor
+            completion = editor.isAutomaticTextCompletionEnabled
+            prediction = editor.inlinePredictionType
+            editor.isAutomaticTextCompletionEnabled = false
+            editor.inlinePredictionType = .no
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) { restoreCompletion() }
+
+        func restoreCompletion() {
+            // The field editor is shared with other controls in the window.
+            if let completion { editor?.isAutomaticTextCompletionEnabled = completion }
+            if let prediction { editor?.inlinePredictionType = prediction }
+            editor = nil; completion = nil; prediction = nil
+        }
+    }
+}
+
 struct FrameThumbnail: View {
     let image: CGImage?
     var body: some View {
@@ -47,7 +114,7 @@ struct FrameLibraryBrowser: View {
                     Text("Import once. Use in any project.").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
-                TextField("Search frames", text: $search).textFieldStyle(.roundedBorder).frame(width: 200)
+                FrameSearchField(text: $search).frame(width: 200)
                 Button {
                     model.importImages(mockups: true) { id in
                         if let id { revealImportedFrame(id) }

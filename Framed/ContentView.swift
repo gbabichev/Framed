@@ -1035,66 +1035,14 @@ private struct ExportDialog: View {
             Divider()
             HStack(alignment: .top, spacing: 24) {
                 ExportPreview(model: model, options: exportOptions)
-                    .frame(width: 260).frame(maxHeight: .infinity)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        InspectorCard("Export settings", systemImage: "square.and.arrow.up") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Format")
-                                Picker("Format", selection: $model.jpeg) {
-                                    Text("PNG").tag(false)
-                                    Text("JPEG").tag(true)
-                                }.pickerStyle(.segmented).labelsHidden()
-                                if model.jpeg {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        HStack {
-                                            Text("JPEG quality")
-                                            Spacer()
-                                            Text(exportOptions.jpegQuality, format: .percent.precision(.fractionLength(0)))
-                                                .foregroundStyle(.secondary).monospacedDigit()
-                                        }
-                                        Slider(value: $exportOptions.jpegQuality, in: 0.1...1, step: 0.05)
-                                            .accessibilityLabel("JPEG quality")
-                                        Text("Lower quality produces smaller files. Higher quality preserves more detail.")
-                                            .font(.caption).foregroundStyle(.secondary)
-                                    }
-                                } else {
-                                    LabeledContent("Compression", value: "Lossless")
-                                    Text("PNG preserves image quality. Reduce output size below to make smaller PNG files.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                if exportAll {
-                                    Text(model.jpeg ? "JPEG uses each screenshot’s own background color."
-                                         : "Each screenshot keeps its own background and transparency settings.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                } else {
-                                    InspectorSwitch("Transparent PNG background", isOn: $model.settings.transparentBackground)
-                                        .disabled(model.jpeg)
-                                    Text(model.jpeg ? "JPEG uses the background color selected in Appearance."
-                                         : model.settings.transparentBackground ? "Transparency is preserved. App Store uploads require an opaque background."
-                                         : "Opaque sRGB PNG at the selected canvas dimensions.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        }
-                        ExportSizeSettings(options: $exportOptions, exportAll: exportAll)
-                        InspectorCard("Screenshots", systemImage: "photo.on.rectangle") {
-                            Picker("Screenshots to export", selection: $exportAll) {
-                                Text("Selected screenshot").tag(false)
-                                Text("All screenshots (\(model.screenshots.count))").tag(true)
-                            }.pickerStyle(.radioGroup).labelsHidden()
-                            Text(exportAll ? "Each screenshot uses its own frame, headline, canvas, and effects. Files follow the sidebar order in the folder you choose."
-                                 : model.selectedScreenshot?.name ?? "No screenshot selected")
-                                .font(.caption).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        LabeledContent(exportAll ? "Preview canvas" : "Canvas", value: "\(Int(exportOptions.pixelSize(for: model.settings).width)) × \(Int(exportOptions.pixelSize(for: model.settings).height)) px")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .disabled(model.isBusy)
+                    .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+                VStack(alignment: .leading, spacing: 12) {
+                    ExportFormatSettings(model: model, options: $exportOptions, exportAll: exportAll)
+                    ExportSizeSettings(options: $exportOptions, exportAll: exportAll)
+                    ExportScreenshotSettings(model: model, exportAll: $exportAll)
                 }
+                .disabled(model.isBusy)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
             }.padding(20)
             Divider()
             HStack(spacing: 12) {
@@ -1115,11 +1063,50 @@ private struct ExportDialog: View {
                 .disabled(exportAll ? !model.canExportAll : !model.canExport)
             }.padding(16)
         }
-        .frame(width: 760, height: 680)
+        .frame(width: 760, height: 620)
         .interactiveDismissDisabled(model.isBusy)
         .alert("Export failed", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
+    }
+}
+
+private struct ExportFormatSettings: View {
+    @Bindable var model: EditorModel
+    @Binding var options: ExportOptions
+    let exportAll: Bool
+
+    var body: some View {
+        InspectorCard("Export settings", systemImage: "square.and.arrow.up") {
+            HStack {
+                Text("Format")
+                Spacer()
+                Picker("Format", selection: $model.jpeg) {
+                    Text("PNG").tag(false)
+                    Text("JPEG").tag(true)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
+            }
+            if model.jpeg {
+                HStack(spacing: 10) {
+                    Text("Quality")
+                    Slider(value: $options.jpegQuality, in: 0.1...1, step: 0.05)
+                        .accessibilityLabel("JPEG quality")
+                        .help("Lower quality produces smaller files; higher quality preserves more detail.")
+                    Text(options.jpegQuality, format: .percent.precision(.fractionLength(0)))
+                        .foregroundStyle(.secondary).monospacedDigit().frame(width: 38, alignment: .trailing)
+                }
+            }
+            if !exportAll && !model.jpeg {
+                Toggle("Transparent background", isOn: $model.settings.transparentBackground)
+                    .toggleStyle(.switch).controlSize(.small)
+            }
+            Text(exportAll ? "Uses each screenshot’s background settings."
+                 : model.jpeg ? "JPEG uses the background color from Appearance."
+                 : model.settings.transparentBackground ? "Transparent PNG. App Store uploads need an opaque background."
+                 : "Opaque sRGB PNG with lossless compression.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -1141,16 +1128,30 @@ private struct ExportSizeSettings: View {
                 Text("50%").tag(0.5)
                 Text("25%").tag(0.25)
             }
-            Text(options.preset == nil
-                 ? "Uses each screenshot’s saved canvas. Export sizing does not change your layouts."
-                 : "Uses this canvas size for every exported screenshot, keeping each layout’s orientation.")
+            Text(options.scale < 1 ? "Use 100% to keep the selected App Store dimensions."
+                 : "Export sizing leaves your saved layouts unchanged.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if options.scale < 1 {
-                Text("Scaling reduces pixel dimensions. Use 100% to keep the selected App Store size.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        }
+    }
+}
+
+private struct ExportScreenshotSettings: View {
+    let model: EditorModel
+    @Binding var exportAll: Bool
+
+    var body: some View {
+        InspectorCard("Screenshots", systemImage: "photo.on.rectangle") {
+            Picker("Screenshots to export", selection: $exportAll) {
+                Text("Selected").tag(false)
+                Text("All (\(model.screenshots.count))").tag(true)
+            }.pickerStyle(.segmented).labelsHidden()
+            Text(exportAll ? "Saved in sidebar order to the folder you choose."
+                 : model.selectedScreenshot?.name ?? "No screenshot selected")
+                .font(.caption).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+                .help(exportAll ? "Each screenshot uses its own frame, headline, canvas, and effects."
+                      : model.selectedScreenshot?.name ?? "No screenshot selected")
         }
     }
 }
@@ -1180,7 +1181,8 @@ private struct ExportPreview: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            Text("Preview").font(.caption).foregroundStyle(.secondary)
+            Text("\(Int(options.pixelSize(for: model.settings).width)) × \(Int(options.pixelSize(for: model.settings).height)) px")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
