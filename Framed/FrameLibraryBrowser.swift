@@ -97,7 +97,6 @@ struct FrameLibraryBrowser: View {
     @State private var search = ""
     @State private var familyFilter: FrameDeviceFamily?
     @State private var selection = FrameSelection()
-    @State private var multipleSelection = false
     @State private var noFrame = false
     @State private var renameFrame: SavedFrame?
     @State private var renamedName = ""
@@ -114,7 +113,6 @@ struct FrameLibraryBrowser: View {
                     Text("Import once. Use in any project.").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
-                FrameSearchField(text: $search).frame(width: 200)
                 Button {
                     model.importImages(mockups: true) { id in
                         if let id { revealImportedFrame(id) }
@@ -122,30 +120,27 @@ struct FrameLibraryBrowser: View {
                 } label: {
                     Label("Import…", systemImage: "plus")
                 }
-            }.padding(20)
-            VStack(alignment: .leading, spacing: 4) {
-                Link(destination: URL(string: "https://developer.apple.com/design/resources/")!) {
-                    Label("Get frames from Apple Design Resources", systemImage: "arrow.up.right")
-                }
-                Text("Download device bezels from Apple, then import transparent PNGs here. If needed, export PNGs from the downloaded design files. Apple device artwork is not included with Framed.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.caption)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20).padding(.bottom, 12)
-            Picker("Device family", selection: $familyFilter) {
-                Text("All").tag(FrameDeviceFamily?.none)
-                ForEach(FrameDeviceFamily.allCases) { family in
-                    Text(family.title).tag(Optional(family))
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .padding(20)
+            HStack(spacing: 12) {
+                FrameSearchField(text: $search)
+                    .frame(minWidth: 180, maxWidth: .infinity)
+                Picker("Device family", selection: $familyFilter) {
+                    Text("All").tag(FrameDeviceFamily?.none)
+                    ForEach(FrameDeviceFamily.allCases) { family in
+                        Text(family.title).tag(Optional(family))
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 360)
+                .help("Filter frames by device family")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 420)
-            .padding(.horizontal, 20).padding(.bottom, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            FrameManagementBar(multipleSelection: $multipleSelection, selectedCount: selection.ids.count,
+            .controlSize(.regular)
+            .padding(.horizontal, 20).padding(.bottom, 8)
+            FrameManagementBar(selectedCount: selection.ids.count,
                                hasFrames: !library.frames.isEmpty, hasVisibleFrames: !filteredFrames.isEmpty,
                                selectAll: { selection.selectAll(filteredFrames.map(\.id)); noFrame = false },
                                clear: { selection.clear(); noFrame = false },
@@ -159,15 +154,17 @@ struct FrameLibraryBrowser: View {
                               requestRemoval(selection.ids.contains(frame.id) ? selection.ids : [frame.id])
                           })
                     .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
-                if selection.ids.count > 1 {
-                    FrameBatchDetails(count: selection.ids.count) { requestRemoval(selection.ids) }
-                        .frame(width: 230)
-                } else {
-                    FrameDetails(frame: selectedFrame, noFrame: noFrame,
-                                 rename: { renameFrame = $0; renamedName = $0.name },
-                                 remove: { requestRemoval([$0.id]) })
-                        .frame(width: 230)
+                VStack(alignment: .leading, spacing: 0) {
+                    if selection.ids.count > 1 {
+                        FrameBatchDetails(count: selection.ids.count)
+                    } else {
+                        FrameDetails(frame: selectedFrame, noFrame: noFrame,
+                                     rename: { renameFrame = $0; renamedName = $0.name })
+                    }
+                    Divider()
+                    FrameResourceNote()
                 }
+                .frame(width: 230)
             }
             .frame(minHeight: 0, maxHeight: .infinity)
             .clipped()
@@ -176,11 +173,11 @@ struct FrameLibraryBrowser: View {
                 Text(familyFilter != nil || !search.isEmpty ? "\(filteredFrames.count) of \(library.frames.count) frames" : "\(library.frames.count) frames")
                     .font(.caption).foregroundStyle(.secondary)
                 if model.selectedMockup != nil && !model.selectedFrameIsInLibrary {
-                    Button("Add Current Project Frame") {
+                    Button("Save Current Frame to Library") {
                         model.saveSelectedFrameToLibraryInBackground { id in
                             if let id { revealImportedFrame(id) }
                         }
-                    }.controlSize(.small)
+                    }.buttonStyle(.bordered).controlSize(.regular)
                 }
                 Spacer()
                 if preparationToken != nil && !isApplying {
@@ -282,7 +279,7 @@ struct FrameLibraryBrowser: View {
         guard let id else { selection.clear(); noFrame = true; return }
         let modifiers = NSEvent.modifierFlags
         selection.select(id, visible: filteredFrames.map(\.id),
-                         toggle: multipleSelection || modifiers.contains(.command), extend: modifiers.contains(.shift))
+                         toggle: modifiers.contains(.command), extend: modifiers.contains(.shift))
         noFrame = false
     }
     private func perform(_ operation: () throws -> Void) {
@@ -303,7 +300,6 @@ struct FrameLibraryBrowser: View {
 }
 
 private struct FrameManagementBar: View {
-    @Binding var multipleSelection: Bool
     let selectedCount: Int
     let hasFrames: Bool
     let hasVisibleFrames: Bool
@@ -313,35 +309,53 @@ private struct FrameManagementBar: View {
     let removeAll: () -> Void
     var body: some View {
         HStack(spacing: 12) {
-            Toggle("Select Multiple", isOn: $multipleSelection).toggleStyle(.button)
-                .help("Toggle selection by clicking thumbnails. Command-click toggles, Shift-click selects a range.")
-            Button("Select All Shown", action: selectAll).disabled(!hasVisibleFrames)
-            if selectedCount > 0 {
-                Button("Deselect", action: clear)
+            Menu("Selection", systemImage: "checklist") {
+                Button("Select All Shown", action: selectAll).disabled(!hasVisibleFrames)
+                Button("Deselect All", action: clear).disabled(selectedCount == 0)
+                Divider()
+                Button(selectedCount == 1 ? "Remove Selected Frame…" : "Remove Selected Frames…",
+                       role: .destructive, action: removeSelected).disabled(selectedCount == 0)
+                Button("Remove All Frames…", role: .destructive, action: removeAll).disabled(!hasFrames)
             }
+            .menuStyle(.borderedButton)
+            .fixedSize()
+            Text("⌘-click to select multiple. Shift-click to select a range.")
+                .font(.caption).foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Button("Remove Selected…", role: .destructive, action: removeSelected).disabled(selectedCount == 0)
-            Menu {
-                Button("Remove All Frames…", role: .destructive, action: removeAll)
-            } label: { Image(systemName: "ellipsis.circle") }
-                .menuStyle(.borderlessButton).fixedSize()
-                .disabled(!hasFrames).help("More library actions")
+            if selectedCount > 0 {
+                Text("\(selectedCount) selected").font(.caption).foregroundStyle(.secondary)
+            }
         }
-        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
         .padding(.horizontal, 20).padding(.vertical, 10)
+    }
+}
+
+private struct FrameResourceNote: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Need device frames?").font(.subheadline.weight(.semibold))
+            Link(destination: URL(string: "https://developer.apple.com/design/resources/")!) {
+                Label("Apple Design Resources", systemImage: "arrow.up.right")
+            }
+            Text("Download Apple’s Product Bezels and import transparent PNGs. Export PNGs from the design files if needed. Apple artwork isn’t included.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption)
+        .padding(16)
     }
 }
 
 private struct FrameBatchDetails: View {
     let count: Int
-    let remove: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "rectangle.stack").font(.largeTitle).foregroundStyle(.secondary)
             Text("\(count) frames selected").font(.headline)
-            Text("Remove them together, or select one frame to preview and use it.")
+            Text("Use the Selection menu to manage these frames, or select one to preview and use it.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Button("Remove Selected…", role: .destructive, action: remove)
             Spacer()
         }.padding(20)
     }
@@ -412,20 +426,15 @@ private struct FrameDetails: View {
     let frame: SavedFrame?
     let noFrame: Bool
     let rename: (SavedFrame) -> Void
-    let remove: (SavedFrame) -> Void
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             FrameThumbnail(image: frame?.thumbnail)
-                .frame(minHeight: 100, idealHeight: 180, maxHeight: 240)
+                .frame(minHeight: 70, idealHeight: 160, maxHeight: 220)
             if let frame {
-                Text(frame.name).font(.headline).fixedSize(horizontal: false, vertical: true)
+                Text(frame.name).font(.headline).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                 Text("\(frame.width) × \(frame.height) pixels").font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    Button("Rename…") { rename(frame) }
-                    Spacer()
-                    Button(role: .destructive) { remove(frame) } label: { Image(systemName: "trash") }
-                        .help("Remove from library")
-                }.controlSize(.small)
+                Button("Rename…") { rename(frame) }
+                    .buttonStyle(.bordered).controlSize(.regular)
             } else {
                 Text(noFrame ? "No frame" : "Select a frame").font(.headline)
                 Text(noFrame ? "Place the screenshot directly on your canvas." : "Click a thumbnail to inspect it before applying it.")
