@@ -914,6 +914,7 @@ private struct ExportDialog: View {
     @Environment(\.dismiss) private var dismiss
     @State private var exportAll = false
     @State private var showsStatus = false
+    @State private var exportOptions = ExportOptions()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -927,7 +928,7 @@ private struct ExportDialog: View {
             }.padding(20)
             Divider()
             HStack(alignment: .top, spacing: 24) {
-                ExportPreview(model: model)
+                ExportPreview(model: model, options: exportOptions)
                     .frame(width: 260).frame(maxHeight: .infinity)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
@@ -938,6 +939,24 @@ private struct ExportDialog: View {
                                     Text("PNG").tag(false)
                                     Text("JPEG").tag(true)
                                 }.pickerStyle(.segmented).labelsHidden()
+                                if model.jpeg {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack {
+                                            Text("JPEG quality")
+                                            Spacer()
+                                            Text(exportOptions.jpegQuality, format: .percent.precision(.fractionLength(0)))
+                                                .foregroundStyle(.secondary).monospacedDigit()
+                                        }
+                                        Slider(value: $exportOptions.jpegQuality, in: 0.1...1, step: 0.05)
+                                            .accessibilityLabel("JPEG quality")
+                                        Text("Lower quality produces smaller files. Higher quality preserves more detail.")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                } else {
+                                    LabeledContent("Compression", value: "Lossless")
+                                    Text("PNG preserves image quality. Reduce output size below to make smaller PNG files.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                                 if exportAll {
                                     Text(model.jpeg ? "JPEG uses each screenshot’s own background color."
                                          : "Each screenshot keeps its own background and transparency settings.")
@@ -954,17 +973,18 @@ private struct ExportDialog: View {
                                 }
                             }
                         }
+                        ExportSizeSettings(options: $exportOptions, exportAll: exportAll)
                         InspectorCard("Screenshots", systemImage: "photo.on.rectangle") {
                             Picker("Screenshots to export", selection: $exportAll) {
                                 Text("Selected screenshot").tag(false)
                                 Text("All screenshots (\(model.screenshots.count))").tag(true)
                             }.pickerStyle(.radioGroup).labelsHidden()
-                            Text(exportAll ? "Each screenshot uses its own frame, headline, canvas, and effects. Files follow the sidebar order in a new folder."
+                            Text(exportAll ? "Each screenshot uses its own frame, headline, canvas, and effects. Files follow the sidebar order in the folder you choose."
                                  : model.selectedScreenshot?.name ?? "No screenshot selected")
                                 .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        LabeledContent(exportAll ? "Preview canvas" : "Canvas", value: "\(Int(model.settings.outputSize.width)) × \(Int(model.settings.outputSize.height)) px")
+                        LabeledContent(exportAll ? "Preview canvas" : "Canvas", value: "\(Int(exportOptions.pixelSize(for: model.settings).width)) × \(Int(exportOptions.pixelSize(for: model.settings).height)) px")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     .disabled(model.isBusy)
@@ -981,7 +1001,7 @@ private struct ExportDialog: View {
                     .keyboardShortcut(.cancelAction)
                     .disabled(model.isBusy)
                 Button(exportAll ? "Export All…" : "Export…") {
-                    let started = exportAll ? model.exportAll() : model.exportSelected()
+                    let started = exportAll ? model.exportAll(options: exportOptions) : model.exportSelected(options: exportOptions)
                     if started { showsStatus = true }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -989,7 +1009,7 @@ private struct ExportDialog: View {
                 .disabled(exportAll ? !model.canExportAll : !model.canExport)
             }.padding(16)
         }
-        .frame(width: 720, height: 580)
+        .frame(width: 760, height: 680)
         .interactiveDismissDisabled(model.isBusy)
         .alert("Export failed", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
@@ -997,18 +1017,53 @@ private struct ExportDialog: View {
     }
 }
 
+private struct ExportSizeSettings: View {
+    @Binding var options: ExportOptions
+    let exportAll: Bool
+
+    var body: some View {
+        InspectorCard("Output size", systemImage: "arrow.up.left.and.arrow.down.right") {
+            Picker("Canvas", selection: $options.preset) {
+                Text(exportAll ? "Each screenshot’s canvas" : "Current canvas").tag(ScreenshotPreset?.none)
+                ForEach(ScreenshotPreset.all) { preset in
+                    Text(preset.label).tag(Optional(preset))
+                }
+            }
+            Picker("Scale", selection: $options.scale) {
+                Text("100% · Full size").tag(1.0)
+                Text("75%").tag(0.75)
+                Text("50%").tag(0.5)
+                Text("25%").tag(0.25)
+            }
+            Text(options.preset == nil
+                 ? "Uses each screenshot’s saved canvas. Export sizing does not change your layouts."
+                 : "Uses this canvas size for every exported screenshot, keeping each layout’s orientation.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if options.scale < 1 {
+                Text("Scaling reduces pixel dimensions. Use 100% to keep the selected App Store size.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 private struct ExportPreview: View {
     let model: EditorModel
+    let options: ExportOptions
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         VStack(spacing: 10) {
             GeometryReader { geometry in
-                let resolution = PreviewResolution.maxDimension(canvas: model.settings.outputSize, viewport: geometry.size,
-                                                                 displayScale: displayScale)
+                let settings = options.settings(for: model.settings)
+                let pixels = options.pixelSize(for: model.settings)
+                let resolution = min(max(pixels.width, pixels.height),
+                    PreviewResolution.maxDimension(canvas: settings.outputSize, viewport: geometry.size, displayScale: displayScale))
                 if let shot = model.selectedScreenshot,
                    let image = try? CompositionRenderer.render(screenshot: shot.image, mockup: model.selectedMockup?.image,
-                                                               opening: model.opening, settings: model.settings,
+                                                               opening: model.opening, settings: settings,
                                                                maxDimension: resolution, forceOpaque: model.jpeg) {
                     ZStack {
                         if model.settings.transparentBackground && !model.jpeg { TransparencyGrid() }

@@ -666,53 +666,57 @@ final class EditorModel {
     }
 
     @discardableResult
-    func exportSelected() -> Bool {
+    func exportSelected(options: ExportOptions = ExportOptions()) -> Bool {
         guard let screenshot = selectedScreenshot, canExport else { return false }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [jpeg ? .jpeg : .png]
         panel.nameFieldStringValue = "\(screenshot.name)-framed.\(jpeg ? "jpg" : "png")"
         guard panel.runModal() == .OK, let url = panel.url else { return false }
-        do {
-            let image = try CompositionRenderer.render(screenshot: screenshot.image, mockup: selectedMockup?.image, opening: opening, settings: settings, forceOpaque: jpeg)
-            try CompositionRenderer.encode(image, jpeg: jpeg).write(to: url, options: .atomic)
-            status = "Saved \(url.lastPathComponent)."
-            return true
-        } catch { self.error = error.localizedDescription; return false }
+        let frame = selectedMockup?.image, mask = opening, layout = settings, useJPEG = jpeg
+        let access = url.startAccessingSecurityScopedResource()
+        isBusy = true; status = "Exporting screenshot…"
+        Task { @MainActor in
+            defer { isBusy = false; if access { url.stopAccessingSecurityScopedResource() } }
+            do {
+                try await ExportWorker.write(screenshot: screenshot, mockup: frame, opening: mask,
+                    settings: layout, jpeg: useJPEG, options: options, url: url, overwrite: true)
+                status = "Saved \(url.lastPathComponent)."
+            } catch { self.error = error.localizedDescription }
+        }
+        return true
     }
 
     @discardableResult
-    func exportAll() -> Bool {
+    func exportAll(options: ExportOptions = ExportOptions()) -> Bool {
         guard canExportAll else { return false }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true
-        panel.prompt = "Export here"
-        panel.message = "A new folder will be created for this export. Each screenshot uses its own saved layout."
+        panel.allowsMultipleSelection = false; panel.canCreateDirectories = true
+        panel.prompt = "Export Here"
+        panel.message = "Screenshots will be saved directly in this folder. Existing files will be kept."
         guard panel.runModal() == .OK, let directory = panel.url else { return false }
+        let access = directory.startAccessingSecurityScopedResource()
+        let jobs = screenshots.map { shot in (shot, layout(for: shot.id)) }
+        let frames = mockups, masks = openings, useJPEG = jpeg
         isBusy = true
-        status = "Exporting \(screenshots.count) screenshots…"
-        // Yield between images so progress and window events remain responsive.
+        status = "Exporting \(jobs.count) screenshots…"
         Task { @MainActor in
-            let folder = directory.appendingPathComponent("Framed-\(UUID().uuidString.prefix(8))", isDirectory: true)
-            let jobs = screenshots.map { shot in (shot, layout(for: shot.id)) }
-            let frames = mockups, masks = openings, useJPEG = jpeg
             var count = 0
-            defer { isBusy = false }
+            defer { isBusy = false; if access { directory.stopAccessingSecurityScopedResource() } }
             do {
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
                 for (index, job) in jobs.enumerated() {
                     let (shot, layout) = job
                     let mockup = frames.first { $0.id == layout.mockupID }?.image
                     let mask = layout.mockupID.flatMap { masks[$0] }
-                    let image = try CompositionRenderer.render(screenshot: shot.image, mockup: mockup, opening: mask, settings: layout.settings, forceOpaque: useJPEG)
-                    let safeName = shot.name.replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: "/", with: "-")
-                    let url = folder.appendingPathComponent(String(format: "%02d-", index + 1) + safeName + (useJPEG ? ".jpg" : ".png"))
-                    try CompositionRenderer.encode(image, jpeg: useJPEG).write(to: url, options: .atomic)
+                    let url = ExportWorker.availableURL(in: directory,
+                        name: String(format: "%02d-", index + 1) + shot.name, extension: useJPEG ? "jpg" : "png")
+                    try await ExportWorker.write(screenshot: shot, mockup: mockup, opening: mask,
+                        settings: layout.settings, jpeg: useJPEG, options: options, url: url, overwrite: false)
                     count += 1
                     status = "Exported \(count) of \(jobs.count)…"
-                    await Task.yield()
                 }
-                status = "Saved \(count) screenshots in \(folder.lastPathComponent)."
-                NSWorkspace.shared.activateFileViewerSelecting([folder])
+                status = "Saved \(count) screenshots in \(directory.lastPathComponent)."
+                NSWorkspace.shared.activateFileViewerSelecting([directory])
             } catch { self.error = "Export stopped after \(count) files. \(error.localizedDescription)" }
         }
         return true

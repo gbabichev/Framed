@@ -273,7 +273,7 @@ nonisolated struct HeadlineSettings: Codable, Equatable, Sendable {
     }
 }
 
-struct HeadlineLayout {
+nonisolated struct HeadlineLayout {
     let rect: CGRect // Top-left canvas coordinates, shared by rendering and drag hit testing.
     let lines: [CTLine]
     let widths: [CGFloat]
@@ -281,7 +281,7 @@ struct HeadlineLayout {
     let lineHeight: CGFloat
 }
 
-enum HeadlineRenderer {
+nonisolated enum HeadlineRenderer {
     static func layout(_ headline: HeadlineSettings, canvas: CGSize) -> HeadlineLayout? {
         guard headline.enabled else { return nil }
         let text = [headline.firstLine, headline.secondLine].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -454,7 +454,52 @@ nonisolated struct CompositionSettings: Sendable {
 
 }
 
-enum CompositionRenderer {
+nonisolated struct ExportOptions: Sendable {
+    var jpegQuality = 0.95
+    var scale = 1.0
+    var preset: ScreenshotPreset?
+
+    func settings(for original: CompositionSettings) -> CompositionSettings {
+        var result = original
+        if let preset {
+            result.preset = preset
+            result.landscape = preset.width > preset.height || original.outputSize.width > original.outputSize.height
+        }
+        return result
+    }
+
+    func pixelSize(for original: CompositionSettings) -> CGSize {
+        let size = settings(for: original).outputSize
+        return CGSize(width: max(1, (size.width * scale).rounded()),
+                      height: max(1, (size.height * scale).rounded()))
+    }
+}
+
+nonisolated enum ExportWorker {
+    static func availableURL(in directory: URL, name: String, extension suffix: String) -> URL {
+        let safe = name.replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: "/", with: "-")
+        var candidate = directory.appendingPathComponent(safe).appendingPathExtension(suffix)
+        var index = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = directory.appendingPathComponent("\(safe)-\(index)").appendingPathExtension(suffix)
+            index += 1
+        }
+        return candidate
+    }
+
+    @concurrent static func write(screenshot: ImportedImage, mockup: CGImage?, opening: ScreenOpening?,
+                                  settings: CompositionSettings, jpeg: Bool, options: ExportOptions,
+                                  url: URL, overwrite: Bool) async throws {
+        let outputSettings = options.settings(for: settings)
+        let size = options.pixelSize(for: settings)
+        let image = try CompositionRenderer.render(screenshot: screenshot.image, mockup: mockup, opening: opening,
+            settings: outputSettings, maxDimension: max(size.width, size.height), forceOpaque: jpeg)
+        let data = try CompositionRenderer.encode(image, jpeg: jpeg, jpegQuality: options.jpegQuality)
+        try data.write(to: url, options: overwrite ? .atomic : .withoutOverwriting)
+    }
+}
+
+nonisolated enum CompositionRenderer {
     /// A device-only preview: independent of canvas placement, headline, and effects.
     static func deviceThumbnail(screenshot: CGImage, mockup: CGImage, opening: ScreenOpening?,
                                 settings: CompositionSettings, maxDimension: Int = 88) throws -> CGImage {
@@ -657,12 +702,14 @@ enum CompositionRenderer {
         context.restoreGState()
     }
 
-    static func encode(_ image: CGImage, jpeg: Bool) throws -> Data {
+    static func encode(_ image: CGImage, jpeg: Bool, jpegQuality: Double = 0.95) throws -> Data {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, (jpeg ? UTType.jpeg : UTType.png).identifier as CFString, 1, nil) else {
             throw FramedError.message("Could not create the image encoder.")
         }
-        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
+        let properties: [CFString: Any] = jpeg
+            ? [kCGImageDestinationLossyCompressionQuality: max(0, min(1, jpegQuality))] : [:]
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw FramedError.message("Could not encode the image.") }
         return data as Data
     }
