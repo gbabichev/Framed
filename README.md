@@ -9,7 +9,7 @@ A native SwiftUI macOS app for placing device screenshots inside your own transp
 4. Choose an Export Canvas size, background, scale, and Fit or Fill. When a frame has a detected or manually calibrated screen, Use Suggested Canvas offers a supported size based on its screen proportions and pixel dimensions. Applying it is optional; selecting a frame keeps your existing canvas. The frame keeps its orientation. Check the preview and any aspect-ratio or enlargement warnings.
 5. Export one screenshot or export the entire list into a new folder using the same layout.
 
-PNG and JPEG exports are opaque sRGB at the selected pixel dimensions. The app uses user-selected file access and processes images locally. Use File → Save Project (⌘S), Save Project As (⇧⌘S), and Open Project (⌘O) to continue work later. The `.framed` project embeds screenshots and mockups along with the canvas settings, so it can be moved without its source images. Canvas edits show the native dirty-window indicator. Closing a dirty window or quitting offers Save, Don’t Save, and Cancel; cancelling or failing a save preserves your work. Exporting images does not save the project.
+Exports use sRGB at the selected pixel dimensions. In Appearance, enable Transparent background to export a PNG with alpha; the preview shows a checkerboard that is not included in the file. JPEG always uses the selected background color. Transparency is saved with the project. App Store uploads require an opaque background, so turn transparency off for those exports. The app uses user-selected file access and processes images locally. Use File → Save Project (⌘S), Save Project As (⇧⌘S), and Open Project (⌘O) to continue work later. The `.framed` project embeds screenshots and mockups along with the canvas settings, so it can be moved without its source images. Canvas edits show the native dirty-window indicator. Closing a dirty window or quitting offers Save, Don’t Save, and Cancel; cancelling or failing a save preserves your work. Exporting images does not save the project.
 
 ## Mockup requirements
 The screen and exterior background should be transparent. Use manual screen bounds if automatic detection needs correction. An opaque screen placeholder must be removed in an image editor first. Perspective/angled device transformations are not supported. Start with a frame that matches the screenshot's device and orientation; Fit preserves the screenshot with letterboxing, while Fill may crop.
@@ -97,3 +97,10 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 ```
 
 Checks approximate screen measurements, portrait and landscape, devices with multiple accepted resolutions, and unsupported proportions. Suggestions compare screen geometry; they do not identify the device model or change the project until applied.
+
+## Transparency checks
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/TransparencyChecks.swift -o /tmp/framed-transparency-checks
+/tmp/framed-transparency-checks
+```

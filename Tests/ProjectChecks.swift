@@ -36,6 +36,7 @@ struct ProjectChecks {
         model.settings.screenX = 0.12; model.settings.screenY = 0.13
         model.settings.screenWidth = 0.71; model.settings.screenHeight = 0.72
         model.settings.cornerRadius = 0.15
+        model.settings.transparentBackground = true
         model.jpeg = true
         let expected = model.fingerprint
         let selected = model.selectedScreenshotID
@@ -51,6 +52,11 @@ struct ProjectChecks {
         let decoded = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(png as CFData, nil)!, 0, nil)!
         precondition(decoded.width == 100 && decoded.height == 200, "Embedded image dimensions changed")
         precondition(NSBitmapImageRep(cgImage: decoded).colorAt(x: 50, y: 50)!.alphaComponent == 0, "Mockup transparency lost")
+        precondition(reopened.settings.transparentBackground, "Transparency not restored")
+        reopened.settings.transparentBackground = false
+        precondition(reopened.isDirty, "Background changes must dirty project")
+        reopened.settings.transparentBackground = true
+        precondition(!reopened.isDirty, "Restoring saved background must clear dirty state")
         reopened.status = "Transient status"; reopened.error = "Transient error"
         precondition(!reopened.isDirty, "Status/error must not dirty project")
         reopened.selectedScreenshotID = nil

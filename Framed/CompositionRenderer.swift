@@ -102,6 +102,7 @@ struct CompositionSettings {
     var landscape = false
     var deviceScale = 0.88
     var background = NSColor(srgbRed: 0.92, green: 0.94, blue: 0.98, alpha: 1)
+    var transparentBackground = false
     var fillScreen = false
     var manualScreen = false
     var screenX = 0.05
@@ -124,19 +125,22 @@ enum CompositionRenderer {
     }
 
     static func render(screenshot: CGImage, mockup: CGImage?, opening: ScreenOpening?,
-                       settings: CompositionSettings, maxDimension: Double? = nil) throws -> CGImage {
+                       settings: CompositionSettings, maxDimension: Double? = nil, forceOpaque: Bool = false) throws -> CGImage {
         let full = settings.outputSize
         let ratio: CGFloat = maxDimension.map { min(CGFloat(1), CGFloat($0) / max(full.width, full.height)) } ?? 1
         let size = CGSize(width: (full.width * ratio).rounded(), height: (full.height * ratio).rounded())
         guard let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
                                       bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
+                                      bitmapInfo: (settings.transparentBackground && !forceOpaque
+                                          ? CGImageAlphaInfo.premultipliedLast : .noneSkipLast).rawValue) else {
             throw FramedError.message("Could not allocate the export canvas.")
         }
         context.interpolationQuality = .high
-        context.setFillColor(settings.background.withAlphaComponent(1).cgColor)
-        context.fill(CGRect(origin: .zero, size: size))
+        if !settings.transparentBackground || forceOpaque {
+            context.setFillColor(settings.background.withAlphaComponent(1).cgColor)
+            context.fill(CGRect(origin: .zero, size: size))
+        }
         if let mockup {
             let device = deviceRect(image: mockup, canvas: size, scale: settings.deviceScale)
             guard settings.manualScreen || opening != nil else {

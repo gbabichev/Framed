@@ -121,7 +121,7 @@ private struct PreviewPane: View {
             GeometryReader { geometry in
                 if let shot = model.selectedScreenshot {
                     CompositionPreview(screenshot: shot.image, mockup: model.selectedMockup?.image, opening: model.opening,
-                                       settings: model.settings)
+                                       settings: model.settings, forceOpaque: model.jpeg)
                         .frame(width: max(1, geometry.size.width - 72), height: max(1, geometry.size.height - 48))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -165,15 +165,38 @@ private struct CompositionPreview: View {
     let mockup: CGImage?
     let opening: ScreenOpening?
     let settings: CompositionSettings
+    let forceOpaque: Bool
     var body: some View {
         if let image = try? CompositionRenderer.render(screenshot: screenshot, mockup: mockup, opening: opening,
-                                                       settings: settings, maxDimension: 1000) {
-            Image(decorative: image, scale: 1).resizable().scaledToFit()
+                                                       settings: settings, maxDimension: 1000, forceOpaque: forceOpaque) {
+            ZStack {
+                if settings.transparentBackground && !forceOpaque { TransparencyGrid() }
+                Image(decorative: image, scale: 1).resizable()
+            }
+                .aspectRatio(CGFloat(image.width) / CGFloat(image.height), contentMode: .fit)
                 .shadow(color: .black.opacity(0.15), radius: 16, y: 8)
                 .accessibilityLabel("Composed screenshot preview")
         } else {
             ContentUnavailableView("Set the screen area", systemImage: "viewfinder", description: Text("This mockup needs manual screen bounds. Enable Manual screen area in the inspector."))
         }
+    }
+}
+
+private struct TransparencyGrid: View {
+    var body: some View {
+        Canvas { context, size in
+            let tile: CGFloat = 10
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            for row in 0..<Int(ceil(size.height / tile)) {
+                for column in 0..<Int(ceil(size.width / tile)) where (row + column).isMultiple(of: 2) {
+                    let rect = CGRect(x: CGFloat(column) * tile, y: CGFloat(row) * tile,
+                                      width: tile, height: tile)
+                    context.fill(Path(rect), with: .color(.gray.opacity(0.2)))
+                }
+            }
+        }
+        .clipped()
+        .accessibilityHidden(true)
     }
 }
 
@@ -334,7 +357,8 @@ private struct LayoutSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Appearance").font(.headline)
-            ColorPicker("Background", selection: Binding(get: { Color(nsColor: settings.background) }, set: { settings.background = NSColor($0) }), supportsOpacity: false)
+            Toggle("Transparent background", isOn: $settings.transparentBackground)
+            ColorPicker(settings.transparentBackground ? "JPEG background" : "Background", selection: Binding(get: { Color(nsColor: settings.background) }, set: { settings.background = NSColor($0) }), supportsOpacity: false)
             ValueSlider(title: "Device scale", value: $settings.deviceScale, range: 0.4...1)
             Picker("Screenshot", selection: $settings.fillScreen) {
                 Text("Fit").tag(false)
@@ -378,7 +402,10 @@ private struct ExportSettings: View {
                 Button("Export all…") { model.exportAll() }
                     .disabled(!model.canExport || model.screenshots.isEmpty)
             }
-            Text("Opaque sRGB · App Store dimensions")
+            Text(model.settings.transparentBackground
+                 ? (model.jpeg ? "JPEG uses the background color; transparency requires PNG."
+                    : "Transparent PNG · For editing; App Store uploads require an opaque background.")
+                 : "Opaque sRGB · App Store dimensions")
                 .font(.caption2).foregroundStyle(.secondary)
         }
     }

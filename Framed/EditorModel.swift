@@ -356,7 +356,7 @@ final class EditorModel {
         panel.nameFieldStringValue = "\(screenshot.name)-framed.\(jpeg ? "jpg" : "png")"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let image = try CompositionRenderer.render(screenshot: screenshot.image, mockup: selectedMockup?.image, opening: opening, settings: settings)
+            let image = try CompositionRenderer.render(screenshot: screenshot.image, mockup: selectedMockup?.image, opening: opening, settings: settings, forceOpaque: jpeg)
             try CompositionRenderer.encode(image, jpeg: jpeg).write(to: url, options: .atomic)
             status = "Saved \(url.lastPathComponent)."
         } catch { self.error = error.localizedDescription }
@@ -379,7 +379,7 @@ final class EditorModel {
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
                 for (index, shot) in images.enumerated() {
-                    let image = try CompositionRenderer.render(screenshot: shot.image, mockup: mockup, opening: mask, settings: configuration)
+                    let image = try CompositionRenderer.render(screenshot: shot.image, mockup: mockup, opening: mask, settings: configuration, forceOpaque: useJPEG)
                     let safeName = shot.name.replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: "/", with: "-")
                     let url = folder.appendingPathComponent(String(format: "%02d-", index + 1) + safeName + (useJPEG ? ".jpg" : ".png"))
                     try CompositionRenderer.encode(image, jpeg: useJPEG).write(to: url, options: .atomic)

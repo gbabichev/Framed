@@ -13,6 +13,7 @@ struct ProjectSettings: Codable, Equatable {
     var red: Double
     var green: Double
     var blue: Double
+    var transparentBackground: Bool?
     var fillScreen: Bool
     var manualScreen: Bool
     var screenX: Double
@@ -24,6 +25,7 @@ struct ProjectSettings: Codable, Equatable {
     init(_ settings: CompositionSettings) {
         preset = settings.preset; landscape = settings.landscape
         deviceScale = settings.deviceScale
+        transparentBackground = settings.transparentBackground
         let color = settings.background.usingColorSpace(.sRGB) ?? .white
         red = max(0, min(1, color.redComponent))
         green = max(0, min(1, color.greenComponent))
@@ -45,6 +47,7 @@ struct ProjectSettings: Codable, Equatable {
         var settings = CompositionSettings()
         settings.preset = preset; settings.landscape = landscape; settings.deviceScale = deviceScale
         settings.background = NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
+        settings.transparentBackground = transparentBackground ?? false
         settings.fillScreen = fillScreen; settings.manualScreen = manualScreen
         settings.screenX = screenX; settings.screenY = screenY
         settings.screenWidth = screenWidth; settings.screenHeight = screenHeight
