@@ -201,3 +201,16 @@ Saving preserves history. Undoing back to the saved composition clears the dirty
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/UndoChecks.swift -o /tmp/framed-undo-checks
 /tmp/framed-undo-checks
 ```
+
+## Fast frame selection
+
+Selecting a single library frame starts background preparation after a short browsing debounce. Use Frame shares that job if it is still running, and reuses the result once ready. Frames already embedded in the current project switch without loading the library PNG or detecting the screen again. Prefetch does not change the canvas, dirty state, or undo history.
+
+The library keeps a small memory cache of decoded originals and clipping masks, shared by project windows. Its count limit is three frames with a 128 MiB cost target; the system may evict cached data under memory pressure. Closing the picker or changing selection cancels abandoned preparation, while an active Use Frame request keeps its shared job alive. Library reload/removal invalidates cached results. A cold frame can still take time to prepare; the picker shows progress when Use Frame has to wait.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FramePreparationChecks.swift -o /tmp/framed-preparation-checks
+/tmp/framed-preparation-checks /path/to/device-frame.png
+```
+
+Checks cover shared preparation and masks, cached reuse across windows, prompt cancellation, retries after failure, renaming, removal, undo, dirty-state isolation, and reusing an embedded frame when its library PNG is unavailable. All file mutations happen in a disposable library copy.

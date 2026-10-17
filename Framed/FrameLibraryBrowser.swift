@@ -27,6 +27,8 @@ struct FrameLibraryBrowser: View {
     @State private var renamedName = ""
     @State private var pendingRemoval: Set<UUID>?
     @State private var removingAll = false
+    @State private var preparationToken: UUID?
+    @State private var isApplying = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -81,6 +83,11 @@ struct FrameLibraryBrowser: View {
                     }.controlSize(.small)
                 }
                 Spacer()
+                if preparationToken != nil && !isApplying {
+                    ProgressView().controlSize(.small)
+                        .help("Preparing the selected frame")
+                        .accessibilityLabel("Preparing selected frame")
+                }
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(noFrame ? "Use No Frame" : "Use Frame") { applySelection() }
                     .keyboardShortcut(.defaultAction)
@@ -88,14 +95,17 @@ struct FrameLibraryBrowser: View {
             }.padding(16)
         }
         .frame(minWidth: 760, idealWidth: 820, minHeight: 540, idealHeight: 600)
-        .disabled(model.isBusy || library.isImporting || library.isRemoving)
+        .disabled(model.isBusy || library.isImporting || library.isRemoving || isApplying)
         .overlay {
             if library.isRemoving {
                 ProgressView("Removing frames…")
                     .padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            } else if isApplying {
+                ProgressView("Preparing frame…")
+                    .padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
-        .interactiveDismissDisabled(library.isRemoving)
+        .interactiveDismissDisabled(library.isRemoving || isApplying)
         .sheet(isPresented: Binding(get: { model.isPresentingFrameImport }, set: { _ in })) {
             FrameImportProgress(model: model, library: library)
                 .environment(\.isEnabled, true)
@@ -105,6 +115,17 @@ struct FrameLibraryBrowser: View {
             noFrame = model.selectedMockup == nil
         }
         .onChange(of: library.frames.map(\.id)) { _, ids in selection.retain(Set(ids)) }
+        .task(id: selectedFrame) {
+            guard let frame = selectedFrame else { preparationToken = nil; return }
+            let token = UUID()
+            preparationToken = token
+            defer { if preparationToken == token { preparationToken = nil } }
+            do {
+                // Avoid decoding every frame while the user quickly browses thumbnails.
+                try await Task.sleep(for: .milliseconds(120))
+                try await model.prefetchLibraryFrame(frame)
+            } catch { /* Cancellation and prefetch errors are handled by Use Frame if needed. */ }
+        }
         .alert("Rename Frame", isPresented: Binding(get: { renameFrame != nil }, set: { if !$0 { renameFrame = nil } })) {
             TextField("Frame name", text: $renamedName)
             Button("Cancel", role: .cancel) { renameFrame = nil }
@@ -164,9 +185,12 @@ struct FrameLibraryBrowser: View {
         do { try operation() } catch { library.error = error.localizedDescription }
     }
     private func applySelection() {
+        guard !isApplying else { return }
         if noFrame { model.selectMockup(nil); dismiss() }
         else if let frame = selectedFrame {
+            isApplying = true
             Task { @MainActor in
+                defer { isApplying = false }
                 if await model.useLibraryFrameInBackground(frame) { dismiss() }
                 else { library.error = model.error; model.error = nil }
             }

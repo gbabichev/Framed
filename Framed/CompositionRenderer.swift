@@ -46,6 +46,7 @@ nonisolated struct ScreenOpening: Sendable {
     let mask: CGImage
 
     static func detect(in image: CGImage) -> Self? {
+        guard !Task.isCancelled else { return nil }
         // Work at a bounded resolution; the original mockup remains full resolution.
         let scale = min(1, 1200 / Double(max(image.width, image.height)))
         let w = max(1, Int(Double(image.width) * scale))
@@ -67,6 +68,7 @@ nonisolated struct ScreenOpening: Sendable {
             var cursor = 0
             var touchesEdge = false
             while cursor < queue.count {
+                if cursor.isMultiple(of: 4096), Task.isCancelled { return nil }
                 let p = queue[cursor]; cursor += 1
                 let x = p % w, y = p / w
                 if x == 0 || y == 0 || x == w - 1 || y == h - 1 { touchesEdge = true }
@@ -92,6 +94,7 @@ nonisolated struct ScreenOpening: Sendable {
         let seed = largest[largest.count / 2]
         let nativeMask = refinedMask(in: image, seed: CGPoint(x: (Double(seed % w) + 0.5) / Double(w),
                                                               y: (Double(seed / w) + 0.5) / Double(h)))
+        guard !Task.isCancelled else { return nil }
         guard let provider = CGDataProvider(data: Data(mask) as CFData),
               let maskImage = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8,
                                       bytesPerRow: w, space: CGColorSpaceCreateDeviceGray(),
@@ -127,6 +130,7 @@ nonisolated struct ScreenOpening: Sendable {
             var seeds = [seedY * width + seedX]
             // Scanline flood fill avoids a queue containing every screen pixel.
             while let point = seeds.popLast() {
+                guard !Task.isCancelled else { return nil }
                 guard remaining[point] < threshold else { continue }
                 let y = point / width
                 var left = point % width

@@ -28,6 +28,15 @@ nonisolated enum FrameImportSource: Sendable {
     }
 }
 
+nonisolated final class PreparedFrame: Sendable {
+    let image: ImportedImage
+    let opening: ScreenOpening?
+    init(image: ImportedImage, opening: ScreenOpening?) { self.image = image; self.opening = opening }
+    var memoryCost: Int {
+        image.image.bytesPerRow * image.image.height + (opening.map { $0.mask.bytesPerRow * $0.mask.height } ?? 0)
+    }
+}
+
 @Observable
 final class FrameLibrary {
     static let shared = FrameLibrary()
@@ -35,14 +44,30 @@ final class FrameLibrary {
     private(set) var frames: [SavedFrame] = []
     var error: String?
 
+    private struct PreparationKey: Hashable, Sendable {
+        let id: UUID
+        let digest: String
+        var cacheKey: NSString { "\(id.uuidString)-\(digest)" as NSString }
+    }
+    private struct PreparationJob {
+        let token = UUID()
+        let task: Task<PreparedFrame, Error>
+        var clients: Set<UUID> = []
+    }
+    @ObservationIgnored private let preparedFrames = NSCache<NSString, PreparedFrame>()
+    @ObservationIgnored private var preparationJobs: [PreparationKey: PreparationJob] = [:]
+
 
     init(directory: URL? = nil) {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Framed/Frames", isDirectory: true)
+        preparedFrames.countLimit = 3
+        preparedFrames.totalCostLimit = 128 * 1024 * 1024
         reload()
     }
 
     func reload() {
+        invalidatePreparation()
         error = nil
         guard FileManager.default.fileExists(atPath: directory.path) else { frames = []; return }
         do {
@@ -130,6 +155,57 @@ final class FrameLibrary {
         try FrameFileWorker.image(for: frame, directory: directory)
     }
 
+    /// Selection prefetch and Use Frame share one decode/mask job, without editing a project.
+    func preparedFrame(for frame: SavedFrame) async throws -> PreparedFrame {
+        try Task.checkCancellation()
+        guard frames.contains(where: { $0.id == frame.id && $0.digest == frame.digest }) else {
+            throw FramedError.message("This frame is no longer in the library.")
+        }
+        let key = PreparationKey(id: frame.id, digest: frame.digest)
+        if let ready = preparedFrames.object(forKey: key.cacheKey) { return ready }
+        let client = UUID()
+        var job: PreparationJob
+        if let existing = preparationJobs[key] { job = existing }
+        else {
+            let directory = directory
+            job = PreparationJob(task: Task {
+                let (image, opening) = try await FrameFileWorker.prepare(frame, directory: directory)
+                return PreparedFrame(image: image, opening: opening)
+            })
+        }
+        job.clients.insert(client)
+        preparationJobs[key] = job
+        let token = job.token, task = job.task
+        defer { releasePreparation(key, token: token, client: client) }
+        return try await withTaskCancellationHandler {
+            let ready = try await task.value
+            try Task.checkCancellation()
+            guard preparationJobs[key]?.token == token,
+                  frames.contains(where: { $0.id == frame.id && $0.digest == frame.digest }) else {
+                throw CancellationError()
+            }
+            preparedFrames.setObject(ready, forKey: key.cacheKey, cost: ready.memoryCost)
+            return ready
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.releasePreparation(key, token: token, client: client) }
+        }
+    }
+
+    private func releasePreparation(_ key: PreparationKey, token: UUID, client: UUID) {
+        guard var job = preparationJobs[key], job.token == token else { return }
+        job.clients.remove(client)
+        if job.clients.isEmpty {
+            preparationJobs[key] = nil
+            job.task.cancel()
+        } else { preparationJobs[key] = job }
+    }
+
+    private func invalidatePreparation() {
+        preparedFrames.removeAllObjects()
+        for job in preparationJobs.values { job.task.cancel() }
+        preparationJobs.removeAll()
+    }
+
     func rename(_ frame: SavedFrame, to proposedName: String) throws {
         guard !isImporting, !isRemoving else { throw FramedError.message("Wait for the current library operation to finish.") }
         let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -145,6 +221,7 @@ final class FrameLibrary {
         // This removes only the reusable copy; each open/saved project owns its images.
         try FileManager.default.removeItem(at: folder(frame.id))
         frames.removeAll { $0.id == frame.id }
+        invalidatePreparation()
     }
 
     func removeFrames(_ ids: Set<UUID>) async {
@@ -154,6 +231,7 @@ final class FrameLibrary {
         let targets = frames.filter { ids.contains($0.id) }
         let result = await FrameFileWorker.removeFrames(targets, directory: directory)
         frames.removeAll { result.removed.contains($0.id) }
+        if !result.removed.isEmpty { invalidatePreparation() }
         if !result.failures.isEmpty { error = result.failures.joined(separator: "\n") }
     }
 
@@ -192,7 +270,10 @@ nonisolated enum FrameFileWorker {
         try Task.checkCancellation()
         return try autoreleasepool {
             let image = try image(for: frame, directory: directory)
-            return (image, ScreenOpening.detect(in: image.image))
+            try Task.checkCancellation()
+            let opening = ScreenOpening.detect(in: image.image)
+            try Task.checkCancellation()
+            return (image, opening)
         }
     }
 

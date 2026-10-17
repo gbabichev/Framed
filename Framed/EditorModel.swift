@@ -110,15 +110,26 @@ final class EditorModel {
     }
 
     func useLibraryFrameInBackground(_ frame: SavedFrame) async -> Bool {
-        guard !isBusy else { return false }
+        guard !isBusy, !Task.isCancelled else { return false }
+        if let existing = mockups.first(where: { libraryIDs[$0.id] == frame.id }) {
+            selectMockup(existing.id)
+            return true
+        }
         isBusy = true
         defer { isBusy = false }
         do {
-            let (image, opening) = try await FrameFileWorker.prepare(frame, directory: frameLibrary.directory)
+            let prepared = try await frameLibrary.preparedFrame(for: frame)
             try Task.checkCancellation()
-            applyFrame(frame, image: image, opening: opening)
+            let image = ImportedImage(id: prepared.image.id, name: frame.name, image: prepared.image.image)
+            applyFrame(frame, image: image, opening: prepared.opening)
             return true
-        } catch { self.error = error.localizedDescription; return false }
+        } catch is CancellationError { return false }
+        catch { self.error = error.localizedDescription; return false }
+    }
+
+    func prefetchLibraryFrame(_ frame: SavedFrame) async throws {
+        guard !mockups.contains(where: { libraryIDs[$0.id] == frame.id }) else { return }
+        _ = try await frameLibrary.preparedFrame(for: frame)
     }
 
     private func applyFrame(_ frame: SavedFrame, image: ImportedImage, opening: ScreenOpening?) {
