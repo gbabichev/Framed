@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var exportPresented = false
     @State private var canvasZoom = CanvasZoom.fit
     @State private var panCanvas = false
+    @State private var aboutPresented = false
 
     var body: some View {
         NavigationSplitView {
@@ -35,6 +36,7 @@ struct ContentView: View {
         .frame(minWidth: 900, minHeight: 640)
         .navigationTitle(model.projectTitle)
         .focusedSceneValue(\.projectModel, model)
+        .focusedSceneValue(\.aboutPresented, $aboutPresented)
         .environment(model)
         .background(ProjectWindowState(model: model, isEdited: model.isDirty, projectURL: model.projectURL).frame(width: 0, height: 0))
         .toolbar {
@@ -83,6 +85,11 @@ struct ContentView: View {
             }
         }
         .disabled(model.isBusy)
+        .overlay {
+            if aboutPresented {
+                AboutOverlayView(isPresented: $aboutPresented)
+            }
+        }
         .onChange(of: canvasZoom) { _, value in
             if value == .fit { panCanvas = false }
         }

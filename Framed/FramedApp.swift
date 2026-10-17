@@ -18,7 +18,10 @@ struct FramedApp: App {
         }
         .defaultSize(width: 1150, height: 800)
         .windowResizability(.contentMinSize)
-        .commands { ProjectCommands() }
+        .commands {
+            ProjectCommands()
+            AboutCommands()
+        }
         .onChange(of: ProjectWindowRegistry.shared.requestID) { _, _ in
             if ProjectWindowRegistry.shared.needsWindow { openWindow(id: "main") }
         }
