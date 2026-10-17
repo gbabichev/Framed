@@ -1,6 +1,28 @@
 import Foundation
 import CoreGraphics
 
+nonisolated enum FrameDeviceFamily: String, Codable, CaseIterable, Identifiable, Sendable {
+    case watch, iPhone, iPad, mac
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .watch: "Watch"
+        case .iPhone: "iPhone"
+        case .iPad: "iPad"
+        case .mac: "Mac"
+        }
+    }
+    static func detect(in name: String) -> Self? {
+        let words = name.lowercased().split { !$0.isLetter && !$0.isNumber }
+        guard let first = words.first else { return nil }
+        if first == "watch" || first == "aw" || (first == "apple" && words.dropFirst().first == "watch") { return .watch }
+        if first == "iphone" { return .iPhone }
+        if first == "ipad" { return .iPad }
+        if ["mac", "macbook", "imac"].contains(first) { return .mac }
+        return nil
+    }
+}
+
 nonisolated struct ScreenshotPreset: Identifiable, Hashable, Codable, Sendable {
     let name: String
     let width: Int
@@ -19,11 +41,11 @@ nonisolated struct ScreenshotPreset: Identifiable, Hashable, Codable, Sendable {
 
     /// Match the screen opening, rather than the complete device artwork.
     /// Resolution breaks ties between accepted sizes with nearly identical proportions.
-    static func suggestion(for screen: CGSize) -> Suggestion? {
+    static func suggestion(for screen: CGSize, family: FrameDeviceFamily? = nil) -> Suggestion? {
         guard screen.width.isFinite, screen.height.isFinite,
               screen.width > 0, screen.height > 0 else { return nil }
-        let candidates = all.flatMap { preset in
-            (preset.width < preset.height ? [false, true] : [false]).map {
+        let candidates = all.filter { family == nil || FrameDeviceFamily.detect(in: $0.name) == family }.flatMap { preset in
+            (preset.width < preset.height ? [false, true] : [preset.width > preset.height]).map {
                 Suggestion(preset: preset, landscape: $0)
             }
         }
@@ -33,7 +55,10 @@ nonisolated struct ScreenshotPreset: Identifiable, Hashable, Codable, Sendable {
             let resolutionError = abs(log(size.width / screen.width)) + abs(log(size.height / screen.height))
             return (candidate, aspectError, resolutionError)
         }
-        guard let closestAspect = ranked.map({ $0.1 }).min(), closestAspect < 0.025 else { return nil }
+        // Known device families always get an accepted canvas from that family.
+        // MacBook screens with a menu-bar/notch area are slightly taller than the
+        // App Store's 16:10 Mac canvases, so an exact aspect match is not expected.
+        guard let closestAspect = ranked.map({ $0.1 }).min(), family != nil || closestAspect < 0.025 else { return nil }
         return ranked.filter { $0.1 <= closestAspect + 0.003 }
             .min { $0.2 < $1.2 }?.0
     }

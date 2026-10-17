@@ -4,28 +4,6 @@ import ImageIO
 import Observation
 import UniformTypeIdentifiers
 
-nonisolated enum FrameDeviceFamily: String, Codable, CaseIterable, Identifiable, Sendable {
-    case watch, iPhone, iPad, mac
-    var id: Self { self }
-    var title: String {
-        switch self {
-        case .watch: "Watch"
-        case .iPhone: "iPhone"
-        case .iPad: "iPad"
-        case .mac: "Mac"
-        }
-    }
-    static func detect(in name: String) -> Self? {
-        let words = name.lowercased().split { !$0.isLetter && !$0.isNumber }
-        guard let first = words.first else { return nil }
-        if first == "watch" || first == "aw" || (first == "apple" && words.dropFirst().first == "watch") { return .watch }
-        if first == "iphone" { return .iPhone }
-        if first == "ipad" { return .iPad }
-        if ["mac", "macbook", "imac"].contains(first) { return .mac }
-        return nil
-    }
-}
-
 nonisolated struct SavedFrame: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String

@@ -602,7 +602,9 @@ private struct OutputSettings: View {
             }
             .menuStyle(.borderedButton)
             .help("Choose an App Store screenshot size")
-            Picker("Orientation", selection: $settings.landscape) {
+            Picker("Orientation", selection: Binding(
+                get: { settings.outputSize.width > settings.outputSize.height },
+                set: { settings.landscape = $0 })) {
                 Text("Portrait").tag(false)
                 Text("Landscape").tag(true)
             }
@@ -627,7 +629,7 @@ private struct CanvasSuggestion: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label(matches ? "Matches frame proportions" : "Suggested for this frame",
+            Label(matches ? "Canvas matched to device frame" : "Suggested for this frame",
                   systemImage: matches ? "checkmark.circle" : "sparkles")
                 .font(.caption).foregroundStyle(.secondary)
             if !matches {

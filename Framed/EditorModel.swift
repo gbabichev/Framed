@@ -471,10 +471,14 @@ final class EditorModel {
     var selectedMockup: ImportedImage? { mockups.first { $0.id == selectedMockupID } }
     var opening: ScreenOpening? { selectedMockupID.flatMap { openings[$0] } }
     var suggestedCanvas: ScreenshotPreset.Suggestion? {
-        guard let frame = selectedMockup,
-              let bounds = settings.manualScreen ? settings.manualBounds : opening?.bounds else { return nil }
+        guard let frame = selectedMockup else { return nil }
+        let family = frameLibrary.frames.first { $0.id == selectedLibraryFrameID }?.family
+            ?? FrameDeviceFamily.detect(in: frame.name)
+        let bounds = settings.manualScreen ? settings.manualBounds : opening?.bounds
+        // Family still supplies a useful default for artwork needing manual calibration.
+        guard let bounds = bounds ?? (family != nil ? CGRect(x: 0, y: 0, width: 1, height: 1) : nil) else { return nil }
         return ScreenshotPreset.suggestion(for: CGSize(width: CGFloat(frame.image.width) * bounds.width,
-                                                       height: CGFloat(frame.image.height) * bounds.height))
+                                                       height: CGFloat(frame.image.height) * bounds.height), family: family)
     }
 
     var canExport: Bool { selectedScreenshot != nil && (selectedMockup == nil || opening != nil || settings.manualScreen) && !isBusy }
@@ -535,7 +539,7 @@ final class EditorModel {
                     screenshots.append(imported)
                     layouts[imported.id] = inherited
                     selectedScreenshotID = imported.id
-                    if screenshots.count == 1 {
+                    if screenshots.count == 1 && selectedMockupID == nil {
                         let w = imported.image.width, h = imported.image.height
                         if let preset = ScreenshotPreset.all.first(where: { ($0.width == w && $0.height == h) || ($0.width == h && $0.height == w) }) {
                             settings.preset = preset
@@ -581,6 +585,10 @@ final class EditorModel {
         if let bounds = opening?.bounds {
             settings.screenX = bounds.minX; settings.screenY = bounds.minY
             settings.screenWidth = bounds.width; settings.screenHeight = bounds.height
+        }
+        if let canvas = suggestedCanvas {
+            settings.preset = canvas.preset
+            settings.landscape = canvas.landscape
         }
     }
 
