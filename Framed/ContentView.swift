@@ -7,7 +7,17 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             ScreenshotSidebar(model: model)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { model.importImages(mockups: false) } label: {
+                            Label("Add screenshots", systemImage: "photo.badge.plus")
+                        }
+                        .labelStyle(.iconOnly)
+                        .keyboardShortcut("i", modifiers: .command)
+                        .help("Add screenshots (Command-I)")
+                    }
+                }
         } detail: {
             HSplitView {
                 PreviewPane(model: model)
@@ -24,8 +34,6 @@ struct ContentView: View {
         .background(ProjectWindowState(model: model, isEdited: model.isDirty, projectURL: model.projectURL).frame(width: 0, height: 0))
         .toolbar {
             ToolbarItemGroup {
-                Button { model.importImages(mockups: false) } label: { Label("Add screenshots", systemImage: "photo.badge.plus") }
-                    .keyboardShortcut("i", modifiers: .command)
                 Button { model.importImages(mockups: true) } label: { Label("Add mockups", systemImage: "iphone") }
                 Button { model.exportSelected() } label: { Label("Export", systemImage: "square.and.arrow.up") }
                     .keyboardShortcut("e", modifiers: .command)
@@ -56,11 +64,6 @@ private struct ScreenshotSidebar: View {
     @Bindable var model: EditorModel
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Screenshots").font(.headline).lineLimit(1)
-                Spacer()
-                Text("\(model.screenshots.count)").foregroundStyle(.secondary).monospacedDigit()
-            }.padding()
             if model.screenshots.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "photo.on.rectangle.angled")
@@ -77,18 +80,18 @@ private struct ScreenshotSidebar: View {
             } else {
                 List(selection: $model.selectedScreenshotID) {
                     ForEach(model.screenshots) { shot in
-                        ScreenshotRow(name: shot.name, image: shot.image)
+                        ScreenshotRow(name: shot.name, image: shot.image, remove: { model.removeScreenshot(shot.id) })
                             .tag(shot.id)
+                            .listRowBackground(Color.clear)
                             .contextMenu {
                                 Button("Remove", role: .destructive) { model.removeScreenshot(shot.id) }
                             }
                     }
-                }.listStyle(.sidebar)
+                }
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
             }
-            Divider()
-            Button { model.importImages(mockups: false) } label: {
-                Label("Add…", systemImage: "plus").frame(maxWidth: .infinity)
-            }.padding()
         }
     }
 }
@@ -96,15 +99,29 @@ private struct ScreenshotSidebar: View {
 private struct ScreenshotRow: View {
     let name: String
     let image: CGImage
+    let remove: () -> Void
+
     var body: some View {
         HStack(spacing: 10) {
-            Image(decorative: image, scale: 1).resizable().scaledToFit()
-                .frame(width: 38, height: 52).background(.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(name).lineLimit(2).font(.callout)
-                Text("\(image.width) × \(image.height)").font(.caption).foregroundStyle(.secondary)
+            Image(decorative: image, scale: 1).resizable().scaledToFill()
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).lineLimit(1).help(name)
+                Text("\(image.width) × \(image.height)")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-        }.padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button(role: .destructive, action: remove) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Remove screenshot from project")
+            .accessibilityLabel(Text("Remove \(name)"))
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 }
 
@@ -295,26 +312,98 @@ private struct TransparencyGrid: View {
     }
 }
 
+// Matches Simple Layout's ToolSection and SettingsRow styling, using native switches.
+private struct InspectorCard<Content: View>: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+    let headerAction: (() -> Void)?
+    let content: Content
+
+    init(_ title: LocalizedStringKey, systemImage: String, headerAction: (() -> Void)? = nil,
+         @ViewBuilder content: () -> Content) {
+        self.title = title; self.systemImage = systemImage
+        self.headerAction = headerAction; self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Text(title).font(.headline)
+                Spacer(minLength: 0)
+                if let headerAction {
+                    Button(action: headerAction) { Image(systemName: "plus") }
+                        .help("Import PNG mockups")
+                        .accessibilityLabel("Import PNG mockups")
+                }
+            }
+            content
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08))
+        }
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+}
+
+private struct InspectorSwitch: View {
+    let title: LocalizedStringKey
+    @Binding var isOn: Bool
+
+    init(_ title: LocalizedStringKey, isOn: Binding<Bool>) {
+        self.title = title; _isOn = isOn
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.regular)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private struct InspectorPane: View {
     @Bindable var model: EditorModel
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 16) {
-                    OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
-                    Divider()
-                    MockupSettings(model: model)
-                    Divider()
-                    LayoutSettings(settings: $model.settings)
-                    Divider()
-                    EffectsSettings(effects: $model.settings.effects)
-                    Divider()
-                    HeadlineSettingsView(settings: $model.settings)
+                VStack(alignment: .leading, spacing: 18) {
+                    InspectorCard("Export Canvas", systemImage: "rectangle") {
+                        OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
+                    }
+                    InspectorCard("Device frame", systemImage: "iphone", headerAction: { model.importImages(mockups: true) }) {
+                        MockupSettings(model: model)
+                    }
+                    InspectorCard("Appearance", systemImage: "paintpalette") {
+                        LayoutSettings(settings: $model.settings)
+                    }
+                    InspectorCard("Effects", systemImage: "sparkles") {
+                        EffectsSettings(effects: $model.settings.effects)
+                    }
+                    InspectorCard("Headline", systemImage: "textformat") {
+                        HeadlineSettingsView(settings: $model.settings)
+                    }
                     if !model.warnings.isEmpty {
-                        ForEach(model.warnings, id: \.self) { warning in
-                            Label(warning, systemImage: "exclamationmark.triangle")
-                                .font(.caption).foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
+                        InspectorCard("Checks", systemImage: "exclamationmark.triangle") {
+                            ForEach(model.warnings, id: \.self) { warning in
+                                Text(warning).font(.caption).foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                 }
@@ -322,8 +411,10 @@ private struct InspectorPane: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             Divider()
-            ExportSettings(model: model)
-                .padding(16)
+            InspectorCard("Export", systemImage: "square.and.arrow.up") {
+                ExportSettings(model: model)
+            }
+            .padding(16)
         }
         .controlSize(.small)
         .background(.background)
@@ -336,7 +427,6 @@ private struct OutputSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Export Canvas").font(.headline)
             Text("The final image size, including the frame and background.")
                 .font(.caption).foregroundStyle(.secondary)
             Text(settings.preset.name)
@@ -398,13 +488,6 @@ private struct MockupSettings: View {
     @Bindable var model: EditorModel
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Device frame").font(.headline)
-                Spacer()
-                Button { model.importImages(mockups: true) } label: {
-                    Image(systemName: "plus")
-                }.help("Import PNG mockups")
-            }
             Button { model.isShowingFrameLibrary = true } label: {
                 HStack(spacing: 12) {
                     FrameThumbnail(image: model.selectedMockup?.image)
@@ -448,7 +531,7 @@ private struct ScreenCalibrationSettings: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Automatic detection is recommended.")
                     .foregroundStyle(.secondary)
-                Toggle("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled)
+                InspectorSwitch("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled)
                 if model.settings.manualScreen {
                     if model.opening != nil {
                         Button("Reset to Detected Screen") { model.resetScreenCalibration() }
@@ -476,8 +559,7 @@ private struct LayoutSettings: View {
     @Binding var settings: CompositionSettings
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Appearance").font(.headline)
-            Toggle("Transparent background", isOn: $settings.transparentBackground)
+            InspectorSwitch("Transparent background", isOn: $settings.transparentBackground)
             ColorPicker(settings.transparentBackground ? "JPEG background" : "Background", selection: Binding(get: { Color(nsColor: settings.background) }, set: { settings.background = NSColor($0) }), supportsOpacity: false)
             ValueSlider(title: "Device scale", value: $settings.deviceScale, range: 0.4...1)
             DevicePositionSettings(settings: $settings)
@@ -527,8 +609,7 @@ private struct EffectsSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Effects").font(.headline)
-            Toggle("Corner glow", isOn: $effects.cornerGlow)
+            InspectorSwitch("Corner glow", isOn: $effects.cornerGlow)
             if effects.cornerGlow {
                 ColorPicker("Glow color", selection: $effects.pickerColor, supportsOpacity: false)
                 Picker("Corner", selection: $effects.glowCorner) {
@@ -537,7 +618,7 @@ private struct EffectsSettings: View {
                 ValueSlider(title: "Glow strength", value: $effects.glowStrength, range: 0...1)
                 ValueSlider(title: "Glow size", value: $effects.glowSpread, range: 0.2...1.5)
             }
-            Toggle("Device fade", isOn: $effects.deviceFade)
+            InspectorSwitch("Device fade", isOn: $effects.deviceFade)
             if effects.deviceFade {
                 Picker("Fade edge", selection: $effects.fadeEdge) {
                     ForEach(DeviceFadeEdge.allCases) { Text($0.title).tag($0) }
@@ -568,8 +649,7 @@ private struct HeadlineSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Headline").font(.headline)
-            Toggle("Show headline", isOn: $settings.showHeadline)
+            InspectorSwitch("Show headline", isOn: $settings.showHeadline)
             if settings.headline.enabled {
                 TextField("First line", text: $settings.headline.firstLineInput)
                     .textFieldStyle(.roundedBorder)
