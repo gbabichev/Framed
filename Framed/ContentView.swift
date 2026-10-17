@@ -123,6 +123,8 @@ private struct ScreenshotSidebar: View {
                         .font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button("Import screenshots…") { model.importImages(mockups: false) }
+                        .buttonStyle(.borderedProminent)
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -258,13 +260,13 @@ private struct PreviewPane: View {
     var body: some View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
-                if let shot = model.selectedScreenshot {
-                    CompositionPreview(screenshot: shot.image, mockup: model.selectedMockup?.image, opening: model.opening,
+                if model.selectedScreenshot != nil || model.selectedMockup != nil {
+                    CompositionPreview(screenshot: model.selectedScreenshot?.image, mockup: model.selectedMockup?.image, opening: model.opening,
                                        settings: $model.settings, forceOpaque: model.jpeg)
                         .frame(width: max(1, geometry.size.width - 72), height: max(1, geometry.size.height - 48))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    EmptyCanvas { model.importImages(mockups: false) }
+                    EmptyCanvas()
                         .frame(width: geometry.size.width, height: geometry.size.height)
                 }
             }
@@ -279,19 +281,16 @@ private struct PreviewPane: View {
 }
 
 private struct EmptyCanvas: View {
-    let importScreenshots: () -> Void
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "photo.on.rectangle")
                 .font(.system(size: 36)).foregroundStyle(.tertiary)
-            Text("Add your first screenshot")
+            Text("Add a screenshot or device frame")
                 .font(.headline).multilineTextAlignment(.center)
-            Text("Choose an image from your device or simulator.")
+            Text("Import screenshots in the sidebar or choose a device frame in the inspector.")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Import screenshots…", action: importScreenshots)
-                .buttonStyle(.borderedProminent)
         }
         .padding(24)
         .frame(maxWidth: 300)
@@ -322,7 +321,7 @@ private struct CenterGuides: View {
 private struct CompositionPreview: View {
     @Environment(\.displayScale) private var displayScale
     @AppStorage(EditorPreferences.centerGuides) private var showCenterGuides = false
-    let screenshot: CGImage
+    let screenshot: CGImage?
     let mockup: CGImage?
     let opening: ScreenOpening?
     @Binding var settings: CompositionSettings
@@ -359,7 +358,7 @@ private struct CompositionPreview: View {
 private struct DeviceDragOverlay: View {
     @Environment(EditorModel.self) private var editor
     @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
-    let screenshot: CGImage
+    let screenshot: CGImage?
     let mockup: CGImage?
     @Binding var settings: CompositionSettings
     @State private var dragOrigin: CGPoint?

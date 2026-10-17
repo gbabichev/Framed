@@ -60,6 +60,18 @@ struct RendererChecks {
         var settings = CompositionSettings()
         settings.preset = ScreenshotPreset(name: "Test", width: 200, height: 300)
         settings.deviceScale = 1
+        settings.background = .green
+        let frameOnly = try CompositionRenderer.render(screenshot: nil, mockup: frame, opening: nil, settings: settings)
+        let frameOnlyBitmap = NSBitmapImageRep(cgImage: frameOnly)
+        require(frameOnlyBitmap.colorAt(x: 50, y: 50)!.greenComponent > 0.9,
+                "Frame-only preview should reveal the canvas through the empty screen")
+        require(frameOnlyBitmap.colorAt(x: 150, y: 100)!.redComponent < 0.3,
+                "Frame-only preview should retain the bezel")
+        settings.transparentBackground = true
+        let transparentFrame = try CompositionRenderer.render(screenshot: nil, mockup: frame, opening: nil, settings: settings)
+        require(NSBitmapImageRep(cgImage: transparentFrame).colorAt(x: 50, y: 50)!.alphaComponent < 0.01,
+                "Frame-only preview should preserve an empty transparent screen")
+        settings.transparentBackground = false
         let output = try CompositionRenderer.render(screenshot: shot, mockup: frame, opening: opening, settings: settings)
         let bitmap = NSBitmapImageRep(cgImage: output)
         let top = bitmap.colorAt(x: 50, y: 50)!.usingColorSpace(.deviceRGB)!

@@ -456,12 +456,13 @@ enum CompositionRenderer {
                       y: canvas.height * (1 - settings.deviceY) - height / 2, width: width, height: height)
     }
 
-    static func foregroundRect(screenshot: CGImage, mockup: CGImage?, canvas: CGSize, settings: CompositionSettings) -> CGRect {
+    static func foregroundRect(screenshot: CGImage?, mockup: CGImage?, canvas: CGSize, settings: CompositionSettings) -> CGRect {
+        guard let image = mockup ?? screenshot else { return .zero }
         if mockup == nil && settings.fillScreen { return targetRect(canvas: canvas, settings: settings) }
-        return deviceRect(image: mockup ?? screenshot, canvas: canvas, settings: settings)
+        return deviceRect(image: image, canvas: canvas, settings: settings)
     }
 
-    static func render(screenshot: CGImage, mockup: CGImage?, opening: ScreenOpening?,
+    static func render(screenshot: CGImage?, mockup: CGImage?, opening: ScreenOpening?,
                        settings: CompositionSettings, maxDimension: Double? = nil, forceOpaque: Bool = false) throws -> CGImage {
         let full = settings.outputSize
         let ratio: CGFloat = maxDimension.map { min(CGFloat(1), CGFloat($0) / max(full.width, full.height)) } ?? 1
@@ -507,10 +508,14 @@ enum CompositionRenderer {
         return result
     }
 
-    private static func drawForeground(screenshot: CGImage, mockup: CGImage?, opening: ScreenOpening?,
+    private static func drawForeground(screenshot: CGImage?, mockup: CGImage?, opening: ScreenOpening?,
                                        settings: CompositionSettings, size: CGSize, context: CGContext) throws {
         if let mockup {
             let device = deviceRect(image: mockup, canvas: size, settings: settings)
+            guard let screenshot else {
+                context.draw(mockup, in: device)
+                return
+            }
             guard settings.manualScreen || opening != nil else {
                 throw FramedError.message("Set the mockup’s screen area before exporting.")
             }
@@ -531,7 +536,7 @@ enum CompositionRenderer {
             draw(screenshot, in: screen, fill: settings.fillScreen, context: context)
             context.restoreGState()
             context.draw(mockup, in: device)
-        } else {
+        } else if let screenshot {
             let target = targetRect(canvas: size, settings: settings)
             draw(screenshot, in: target, fill: settings.fillScreen, context: context)
         }
