@@ -44,6 +44,22 @@ struct PerScreenshotChecks {
         let path = root.appendingPathComponent("Set.framed")
         precondition(model.writeProject(to: path))
         let fingerprint = model.fingerprint
+        let frameImage = model.mockups.first { $0.id == frameID }!.image
+        let thumbnail = try CompositionRenderer.deviceThumbnail(screenshot: image, mockup: frameImage,
+                                                                opening: model.screenOpening(for: frameID), settings: model.settings)
+        precondition(thumbnail.width == 44 && thumbnail.height == 88, "Thumbnail must fit the complete frame within 88 pixels")
+        let pixels = thumbnail.dataProvider!.data! as Data
+        precondition(pixels[(thumbnail.height / 2) * thumbnail.bytesPerRow + (thumbnail.width / 2) * 4 + 3] == 255,
+                     "The thumbnail's transparent screen must contain the screenshot")
+        var moved = model.settings
+        moved.deviceX = 0.9; moved.deviceY = 0.1; moved.deviceScale = 0.4
+        let movedThumbnail = try CompositionRenderer.deviceThumbnail(screenshot: image, mockup: frameImage,
+                                                                     opening: model.screenOpening(for: frameID), settings: moved)
+        let thumbnailPNG = try CompositionRenderer.encode(thumbnail, jpeg: false)
+        let movedPNG = try CompositionRenderer.encode(movedThumbnail, jpeg: false)
+        precondition(thumbnailPNG == movedPNG,
+                     "Canvas placement must not crop or shrink the sidebar device")
+        precondition(!model.isDirty, "Rendering thumbnails must not dirty a project")
         model.copyStyle(from: a.id)
         precondition(!model.isDirty, "Copying style must not change the project")
         model.selectedScreenshotID = b.id; model.selectedScreenshotID = c.id

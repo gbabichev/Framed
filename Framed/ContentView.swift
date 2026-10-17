@@ -86,7 +86,11 @@ private struct ScreenshotSidebar: View {
             } else {
                 List(selection: $model.selectedScreenshotID) {
                     ForEach(model.screenshots) { shot in
-                        ScreenshotRow(name: shot.name, image: shot.image, remove: { model.removeScreenshot(shot.id) })
+                        let layout = model.layout(for: shot.id)
+                        let frame = model.mockups.first { $0.id == layout.mockupID }
+                        ScreenshotRow(name: shot.name, image: shot.image, frame: frame,
+                                      opening: model.screenOpening(for: layout.mockupID), settings: layout.settings,
+                                      remove: { model.removeScreenshot(shot.id) })
                             .tag(shot.id)
                             .listRowBackground(Color.clear)
                             .onDrag { NSItemProvider(object: shot.id.uuidString as NSString) }
@@ -137,13 +141,14 @@ private struct ScreenshotSidebar: View {
 private struct ScreenshotRow: View {
     let name: String
     let image: CGImage
+    let frame: ImportedImage?
+    let opening: ScreenOpening?
+    let settings: CompositionSettings
     let remove: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(decorative: image, scale: 1).resizable().scaledToFill()
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            ScreenshotThumbnail(screenshot: image, frame: frame, opening: opening, settings: settings)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).lineLimit(1).help(name)
                 Text("\(image.width) × \(image.height)")
@@ -160,6 +165,48 @@ private struct ScreenshotRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+}
+
+private struct ScreenshotThumbnail: View {
+    let screenshot: CGImage
+    let frame: ImportedImage?
+    let opening: ScreenOpening?
+    let settings: CompositionSettings
+    @State private var rendered: CGImage?
+
+    private struct RenderKey: Equatable {
+        let frameID: UUID?
+        let settings: ProjectSettings
+    }
+
+    // Only screen fitting and calibration affect the device-only thumbnail.
+    private var thumbnailSettings: CompositionSettings {
+        var result = CompositionSettings()
+        result.fillScreen = settings.fillScreen; result.manualScreen = settings.manualScreen
+        result.screenX = settings.screenX; result.screenY = settings.screenY
+        result.screenWidth = settings.screenWidth; result.screenHeight = settings.screenHeight
+        result.cornerRadius = settings.cornerRadius
+        return result
+    }
+
+    var body: some View {
+        Group {
+            if let frame {
+                Image(decorative: rendered ?? frame.image, scale: 1).resizable().scaledToFit()
+            } else {
+                Image(decorative: screenshot, scale: 1).resizable().scaledToFill()
+            }
+        }
+        .frame(width: 44, height: 44)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityHidden(true)
+        .task(id: RenderKey(frameID: frame?.id, settings: ProjectSettings(thumbnailSettings))) {
+            if let frame {
+                rendered = try? CompositionRenderer.deviceThumbnail(screenshot: screenshot, mockup: frame.image,
+                                                                    opening: opening, settings: thumbnailSettings)
+            } else { rendered = nil }
+        }
     }
 }
 

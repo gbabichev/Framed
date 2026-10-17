@@ -401,6 +401,26 @@ struct CompositionSettings {
 }
 
 enum CompositionRenderer {
+    /// A device-only preview: independent of canvas placement, headline, and effects.
+    static func deviceThumbnail(screenshot: CGImage, mockup: CGImage, opening: ScreenOpening?,
+                                settings: CompositionSettings, maxDimension: Int = 88) throws -> CGImage {
+        let ratio = min(1, Double(maxDimension) / Double(max(mockup.width, mockup.height)))
+        let width = max(1, Int((Double(mockup.width) * ratio).rounded()))
+        let height = max(1, Int((Double(mockup.height) * ratio).rounded()))
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw FramedError.message("Could not allocate the device thumbnail.")
+        }
+        var centered = settings
+        centered.deviceScale = 1; centered.deviceX = 0.5; centered.deviceY = 0.5
+        context.interpolationQuality = .high
+        try drawForeground(screenshot: screenshot, mockup: mockup, opening: opening, settings: centered,
+                           size: CGSize(width: width, height: height), context: context)
+        guard let image = context.makeImage() else { throw FramedError.message("Could not render the device thumbnail.") }
+        return image
+    }
+
     static func deviceRect(image: CGImage, canvas: CGSize, scale: Double, center: CGPoint = CGPoint(x: 0.5, y: 0.5)) -> CGRect {
         let factor = min(canvas.width / Double(image.width), canvas.height / Double(image.height)) * scale
         let size = CGSize(width: Double(image.width) * factor, height: Double(image.height) * factor)

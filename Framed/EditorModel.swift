@@ -31,6 +31,9 @@ final class EditorModel {
     func layout(for id: UUID) -> ScreenshotLayout {
         layouts[id] ?? ScreenshotLayout(settings: emptySettings, mockupID: emptyMockupID)
     }
+    func screenOpening(for frameID: UUID?) -> ScreenOpening? {
+        frameID.flatMap { openings[$0] }
+    }
     private var projectLayouts: [ProjectScreenshotLayout] {
         screenshots.map { shot in
             let layout = layout(for: shot.id)
