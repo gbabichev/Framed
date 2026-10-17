@@ -183,7 +183,7 @@ private struct InspectorPane: View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 16) {
-                    OutputSettings(settings: $model.settings)
+                    OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
                     Divider()
                     MockupSettings(model: model)
                     Divider()
@@ -210,9 +210,13 @@ private struct InspectorPane: View {
 
 private struct OutputSettings: View {
     @Binding var settings: CompositionSettings
+    let suggestion: ScreenshotPreset.Suggestion?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Output").font(.headline)
+            Text("Export Canvas").font(.headline)
+            Text("The final image size, including the frame and background.")
+                .font(.caption).foregroundStyle(.secondary)
             Text(settings.preset.name)
                 .font(.callout).lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -221,7 +225,7 @@ private struct OutputSettings: View {
                     Button(preset.label) { settings.preset = preset }
                 }
             } label: {
-                Text("\(settings.preset.width) × \(settings.preset.height) pixels")
+                Text("\(Int(settings.outputSize.width)) × \(Int(settings.outputSize.height)) pixels")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .menuStyle(.borderedButton)
@@ -233,9 +237,38 @@ private struct OutputSettings: View {
             .labelsHidden()
             .pickerStyle(.segmented)
             .disabled(settings.preset.width >= settings.preset.height)
+            if let suggestion {
+                CanvasSuggestion(settings: $settings, suggestion: suggestion)
+            }
             Link("App Store size requirements", destination: ScreenshotPreset.source)
                 .font(.caption)
         }
+    }
+}
+
+private struct CanvasSuggestion: View {
+    @Binding var settings: CompositionSettings
+    let suggestion: ScreenshotPreset.Suggestion
+
+    private var matches: Bool { settings.outputSize == suggestion.size }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(matches ? "Matches frame proportions" : "Suggested for this frame",
+                  systemImage: matches ? "checkmark.circle" : "sparkles")
+                .font(.caption).foregroundStyle(.secondary)
+            if !matches {
+                Text(suggestion.preset.name).font(.caption)
+                Text("\(Int(suggestion.size.width)) × \(Int(suggestion.size.height)) pixels")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Use Suggested Canvas") {
+                    settings.preset = suggestion.preset
+                    settings.landscape = suggestion.landscape
+                }
+                .help("Choose an accepted export size with similar screen proportions. The frame keeps its orientation.")
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

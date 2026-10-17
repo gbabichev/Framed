@@ -6,7 +6,7 @@ A native SwiftUI macOS app for placing device screenshots inside your own transp
 1. Open `Framed.xcodeproj` in Xcode 27.1 and run the Framed scheme.
 2. Add screenshots from your simulator or real device. Multiple images can be imported together.
 3. Open the visual Frame Library in the inspector, import front-facing PNG mockups, and choose a thumbnail. The largest enclosed transparent screen opening is detected automatically; camera cutouts remain visible.
-4. Choose an output size, background, scale, and Fit or Fill. Check the preview and any aspect-ratio or enlargement warnings.
+4. Choose an Export Canvas size, background, scale, and Fit or Fill. When a frame has a detected or manually calibrated screen, Use Suggested Canvas offers a supported size based on its screen proportions and pixel dimensions. Applying it is optional; selecting a frame keeps your existing canvas. The frame keeps its orientation. Check the preview and any aspect-ratio or enlargement warnings.
 5. Export one screenshot or export the entire list into a new folder using the same layout.
 
 PNG and JPEG exports are opaque sRGB at the selected pixel dimensions. The app uses user-selected file access and processes images locally. Use File → Save Project (⌘S), Save Project As (⇧⌘S), and Open Project (⌘O) to continue work later. The `.framed` project embeds screenshots and mockups along with the canvas settings, so it can be moved without its source images. Canvas edits show the native dirty-window indicator. Closing a dirty window or quitting offers Save, Don’t Save, and Cancel; cancelling or failing a save preserves your work. Exporting images does not save the project.
@@ -88,3 +88,12 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 Checks cover toggle/range/filter selection, stale selections, bulk deletion, Remove All, persistence, and preservation of the current project's frame.
 
 Frame import is always a global-library operation, including the main toolbar and inspector plus button. It never adds images to the project, changes its selected frame, or changes its dirty state. Only choosing Use Frame applies a library frame to the canvas. New library entries are saved immediately in Application Support; saving a `.framed` project is not required to keep them.
+
+## Canvas suggestion checks
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Tests/CanvasSuggestionChecks.swift -o /tmp/framed-canvas-checks
+/tmp/framed-canvas-checks
+```
+
+Checks approximate screen measurements, portrait and landscape, devices with multiple accepted resolutions, and unsupported proportions. Suggestions compare screen geometry; they do not identify the device model or change the project until applied.

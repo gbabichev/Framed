@@ -11,6 +11,33 @@ struct ScreenshotPreset: Identifiable, Hashable, Codable {
         landscape && width < height ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
     }
 
+    struct Suggestion: Equatable {
+        let preset: ScreenshotPreset
+        let landscape: Bool
+        var size: CGSize { preset.size(landscape: landscape) }
+    }
+
+    /// Match the screen opening, rather than the complete device artwork.
+    /// Resolution breaks ties between accepted sizes with nearly identical proportions.
+    static func suggestion(for screen: CGSize) -> Suggestion? {
+        guard screen.width.isFinite, screen.height.isFinite,
+              screen.width > 0, screen.height > 0 else { return nil }
+        let candidates = all.flatMap { preset in
+            (preset.width < preset.height ? [false, true] : [false]).map {
+                Suggestion(preset: preset, landscape: $0)
+            }
+        }
+        let ranked = candidates.map { candidate in
+            let size = candidate.size
+            let aspectError = abs(log((size.width / size.height) / (screen.width / screen.height)))
+            let resolutionError = abs(log(size.width / screen.width)) + abs(log(size.height / screen.height))
+            return (candidate, aspectError, resolutionError)
+        }
+        guard let closestAspect = ranked.map({ $0.1 }).min(), closestAspect < 0.025 else { return nil }
+        return ranked.filter { $0.1 <= closestAspect + 0.003 }
+            .min { $0.2 < $1.2 }?.0
+    }
+
     // Apple App Store Connect screenshot specifications, verified 2026-10-16.
     // Accepted dimensions only; required screenshot sets depend on the app's platforms.
     static let source = URL(string: "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications")!

@@ -262,6 +262,13 @@ final class EditorModel {
     var selectedScreenshot: ImportedImage? { screenshots.first { $0.id == selectedScreenshotID } }
     var selectedMockup: ImportedImage? { mockups.first { $0.id == selectedMockupID } }
     var opening: ScreenOpening? { selectedMockupID.flatMap { openings[$0] } }
+    var suggestedCanvas: ScreenshotPreset.Suggestion? {
+        guard let frame = selectedMockup,
+              let bounds = settings.manualScreen ? settings.manualBounds : opening?.bounds else { return nil }
+        return ScreenshotPreset.suggestion(for: CGSize(width: CGFloat(frame.image.width) * bounds.width,
+                                                       height: CGFloat(frame.image.height) * bounds.height))
+    }
+
     var canExport: Bool { selectedScreenshot != nil && (selectedMockup == nil || opening != nil || settings.manualScreen) && !isBusy }
 
     var warnings: [String] {
