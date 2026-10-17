@@ -1,5 +1,7 @@
 # Framed — first version
 
+Original planning notes, kept for reference. For the current user guide, see [README](../README.md); for implementation details and checks, see [Development](Development.md).
+
 A local macOS utility: import screenshot images and front-facing transparent PNG device frames, compose on an App Store-sized canvas, and export opaque sRGB PNG or JPEG.
 
 ## First version

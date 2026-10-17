@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800" role="img" aria-labelledby="title desc">
+  <title id="title">Canvas editor screenshot placeholder</title>
+  <desc id="desc">A square placeholder for a future Framed app screenshot.</desc>
+  <rect width="800" height="800" rx="24" fill="#eeeae2"/>
+  <rect x="40" y="40" width="720" height="720" rx="16" fill="none" stroke="#bfb7ab" stroke-width="2" stroke-dasharray="10 10"/>
+  <g fill="#70675d" font-family="-apple-system, Helvetica Neue, sans-serif" text-anchor="middle">
+    <text x="400" y="338" font-size="18" letter-spacing="3">SCREENSHOT 01</text>
+    <text x="400" y="398" font-size="36" font-weight="600" fill="#3c3933">Canvas editor</text>
+    <text x="400" y="446" font-size="21">Your screenshot here</text>
+  </g>
+</svg>
