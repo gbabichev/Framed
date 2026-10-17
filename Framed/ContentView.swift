@@ -381,20 +381,20 @@ private struct InspectorPane: View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 18) {
-                    InspectorCard("Export Canvas", systemImage: "rectangle") {
-                        OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
-                    }
-                    InspectorCard("Device frame", systemImage: "iphone", headerAction: { model.importImages(mockups: true) }) {
+                    InspectorCard("Device Frame", systemImage: "iphone", headerAction: { model.importImages(mockups: true) }) {
                         MockupSettings(model: model)
                     }
                     InspectorCard("Appearance", systemImage: "paintpalette") {
                         LayoutSettings(settings: $model.settings)
                     }
+                    InspectorCard("Headline", systemImage: "textformat") {
+                        HeadlineSettingsView(settings: $model.settings)
+                    }
                     InspectorCard("Effects", systemImage: "sparkles") {
                         EffectsSettings(effects: $model.settings.effects)
                     }
-                    InspectorCard("Headline", systemImage: "textformat") {
-                        HeadlineSettingsView(settings: $model.settings)
+                    InspectorCard("Export Canvas", systemImage: "rectangle") {
+                        OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
                     }
                     if !model.warnings.isEmpty {
                         InspectorCard("Checks", systemImage: "exclamationmark.triangle") {
@@ -520,30 +520,28 @@ private struct ScreenCalibrationSettings: View {
     @Bindable var model: EditorModel
 
     var body: some View {
-        DisclosureGroup("Screen calibration") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Automatic detection is recommended.")
-                    .foregroundStyle(.secondary)
-                InspectorSwitch("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled)
-                if model.settings.manualScreen {
-                    if model.opening != nil {
-                        Button("Reset to Detected Screen") { model.resetScreenCalibration() }
-                    }
-                    Text("Adjust the blue outline to match the screen opening. Edges are percentages of the frame image.")
-                        .foregroundStyle(.secondary)
-                    ValueSlider(title: "Left edge", value: $model.settings.screenLeft,
-                                range: 0...max(0.001, model.settings.screenRight - 0.1))
-                    ValueSlider(title: "Right edge", value: $model.settings.screenRight,
-                                range: min(0.999, model.settings.screenLeft + 0.1)...1)
-                    ValueSlider(title: "Top edge", value: $model.settings.screenTop,
-                                range: 0...max(0.001, model.settings.screenBottom - 0.1))
-                    ValueSlider(title: "Bottom edge", value: $model.settings.screenBottom,
-                                range: min(0.999, model.settings.screenTop + 0.1)...1)
-                    ValueSlider(title: "Corner rounding", value: $model.settings.cornerRadius, range: 0...0.25)
-                    Text("Manual calibration uses rounded corners. Automatic detection also preserves camera cutouts.")
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Automatic detection is recommended.")
+                .foregroundStyle(.secondary)
+            InspectorSwitch("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled)
+            if model.settings.manualScreen {
+                if model.opening != nil {
+                    Button("Reset to Detected Screen") { model.resetScreenCalibration() }
                 }
-            }.padding(.top, 8)
+                Text("Adjust the blue outline to match the screen opening. Edges are percentages of the frame image.")
+                    .foregroundStyle(.secondary)
+                ValueSlider(title: "Left edge", value: $model.settings.screenLeft,
+                            range: 0...max(0.001, model.settings.screenRight - 0.1))
+                ValueSlider(title: "Right edge", value: $model.settings.screenRight,
+                            range: min(0.999, model.settings.screenLeft + 0.1)...1)
+                ValueSlider(title: "Top edge", value: $model.settings.screenTop,
+                            range: 0...max(0.001, model.settings.screenBottom - 0.1))
+                ValueSlider(title: "Bottom edge", value: $model.settings.screenBottom,
+                            range: min(0.999, model.settings.screenTop + 0.1)...1)
+                ValueSlider(title: "Corner rounding", value: $model.settings.cornerRadius, range: 0...0.25)
+                Text("Manual calibration uses rounded corners. Automatic detection also preserves camera cutouts.")
+                    .foregroundStyle(.secondary)
+            }
         }.font(.caption)
     }
 }
