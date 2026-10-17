@@ -142,3 +142,14 @@ Headline size and position scale proportionally when you change the canvas dimen
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/HeadlineChecks.swift -o /tmp/framed-headline-checks
 /tmp/framed-headline-checks
 ```
+
+## Device placement
+
+Drag the phone or screenshot in the preview to move them together. Appearance → Device position provides horizontal and vertical sliders and Reset Device Position. The screen mask, manual calibration guide, and device fade move with the device; the headline remains independent. Device edges may extend outside the canvas and are cropped on export.
+
+Enabling the headline shifts a centered device down by 4% of the canvas height, without changing its scale. Existing custom positions are preserved. Disabling the headline reverses this default shift if the device has not been repositioned. Reset Device Position restores the center, including the default headroom when a headline is enabled. Position saves with the project and participates in dirty-window tracking; older projects retain centered placement.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/FramedProject.swift Tests/DevicePositionChecks.swift -o /tmp/framed-position-checks
+/tmp/framed-position-checks
+```

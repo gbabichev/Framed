@@ -279,7 +279,7 @@ final class EditorModel {
             guard let bounds = settings.manualScreen ? settings.manualBounds : opening?.bounds else {
                 return ["No enclosed transparent screen found. Enable manual screen area, or choose another transparent PNG frame."]
             }
-            let device = CompositionRenderer.deviceRect(image: mockup.image, canvas: target, scale: settings.deviceScale)
+            let device = CompositionRenderer.deviceRect(image: mockup.image, canvas: target, settings: settings)
             target = CGSize(width: device.width * bounds.width, height: device.height * bounds.height)
             let screenAspect = target.width / target.height
             let shotAspect = Double(shot.image.width) / Double(shot.image.height)

@@ -323,6 +323,8 @@ struct CompositionSettings {
     var preset = ScreenshotPreset.all[0]
     var landscape = false
     var deviceScale = 0.88
+    var deviceX = 0.5
+    var deviceY = 0.5
     var background = NSColor(srgbRed: 0.92, green: 0.94, blue: 0.98, alpha: 1)
     var transparentBackground = false
     var effects = CompositionEffects()
@@ -334,6 +336,21 @@ struct CompositionSettings {
     var screenWidth = 0.90
     var screenHeight = 0.90
     var cornerRadius = 0.06
+    var showHeadline: Bool {
+        get { headline.enabled }
+        set {
+            // Offer headroom only for the default placement; respect an existing layout.
+            if newValue && !headline.enabled && abs(deviceX - 0.5) < 0.0001 && abs(deviceY - 0.5) < 0.0001 {
+                deviceY = 0.54
+            } else if !newValue && headline.enabled && abs(deviceX - 0.5) < 0.0001 && abs(deviceY - 0.54) < 0.0001 {
+                deviceY = 0.5
+            }
+            headline.enabled = newValue
+        }
+    }
+    mutating func resetDevicePosition() {
+        deviceX = 0.5; deviceY = headline.enabled ? 0.54 : 0.5
+    }
     var headlineFontSize: Double {
         get { headline.size * outputSize.width }
         set { headline.size = min(0.15, max(0.01, newValue / outputSize.width)) }
@@ -372,11 +389,28 @@ struct CompositionSettings {
 }
 
 enum CompositionRenderer {
-    static func deviceRect(image: CGImage, canvas: CGSize, scale: Double) -> CGRect {
+    static func deviceRect(image: CGImage, canvas: CGSize, scale: Double, center: CGPoint = CGPoint(x: 0.5, y: 0.5)) -> CGRect {
         let factor = min(canvas.width / Double(image.width), canvas.height / Double(image.height)) * scale
         let size = CGSize(width: Double(image.width) * factor, height: Double(image.height) * factor)
-        return CGRect(x: (canvas.width - size.width) / 2, y: (canvas.height - size.height) / 2,
+        return CGRect(x: canvas.width * center.x - size.width / 2,
+                      y: canvas.height * (1 - center.y) - size.height / 2,
                       width: size.width, height: size.height)
+    }
+
+    static func deviceRect(image: CGImage, canvas: CGSize, settings: CompositionSettings) -> CGRect {
+        deviceRect(image: image, canvas: canvas, scale: settings.deviceScale,
+                   center: CGPoint(x: settings.deviceX, y: settings.deviceY))
+    }
+
+    static func targetRect(canvas: CGSize, settings: CompositionSettings) -> CGRect {
+        let width = canvas.width * settings.deviceScale, height = canvas.height * settings.deviceScale
+        return CGRect(x: canvas.width * settings.deviceX - width / 2,
+                      y: canvas.height * (1 - settings.deviceY) - height / 2, width: width, height: height)
+    }
+
+    static func foregroundRect(screenshot: CGImage, mockup: CGImage?, canvas: CGSize, settings: CompositionSettings) -> CGRect {
+        if mockup == nil && settings.fillScreen { return targetRect(canvas: canvas, settings: settings) }
+        return deviceRect(image: mockup ?? screenshot, canvas: canvas, settings: settings)
     }
 
     static func render(screenshot: CGImage, mockup: CGImage?, opening: ScreenOpening?,
@@ -407,14 +441,7 @@ enum CompositionRenderer {
             layer.interpolationQuality = .high
             try drawForeground(screenshot: screenshot, mockup: mockup, opening: opening,
                                settings: settings, size: size, context: layer)
-            let device: CGRect
-            if mockup == nil && settings.fillScreen {
-                device = CGRect(x: size.width * (1 - settings.deviceScale) / 2,
-                                y: size.height * (1 - settings.deviceScale) / 2,
-                                width: size.width * settings.deviceScale, height: size.height * settings.deviceScale)
-            } else {
-                device = deviceRect(image: mockup ?? screenshot, canvas: size, scale: settings.deviceScale)
-            }
+            let device = foregroundRect(screenshot: screenshot, mockup: mockup, canvas: size, settings: settings)
             guard let foreground = layer.makeImage(),
                   let mask = fadeMask(size: size, device: device, effects: settings.effects) else {
                 throw FramedError.message("Could not render the device fade.")
@@ -435,7 +462,7 @@ enum CompositionRenderer {
     private static func drawForeground(screenshot: CGImage, mockup: CGImage?, opening: ScreenOpening?,
                                        settings: CompositionSettings, size: CGSize, context: CGContext) throws {
         if let mockup {
-            let device = deviceRect(image: mockup, canvas: size, scale: settings.deviceScale)
+            let device = deviceRect(image: mockup, canvas: size, settings: settings)
             guard settings.manualScreen || opening != nil else {
                 throw FramedError.message("Set the mockup’s screen area before exporting.")
             }
@@ -457,9 +484,7 @@ enum CompositionRenderer {
             context.restoreGState()
             context.draw(mockup, in: device)
         } else {
-            let target = CGRect(x: size.width * (1 - settings.deviceScale) / 2,
-                                y: size.height * (1 - settings.deviceScale) / 2,
-                                width: size.width * settings.deviceScale, height: size.height * settings.deviceScale)
+            let target = targetRect(canvas: size, settings: settings)
             draw(screenshot, in: target, fill: settings.fillScreen, context: context)
         }
     }

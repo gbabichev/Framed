@@ -51,6 +51,7 @@ struct ProjectChecks {
         model.settings.headline.x = 0.38; model.settings.headline.y = 0.22
         model.settings.headline.size = 0.07
         model.settings.headline.color = .blue
+        model.settings.deviceX = 0.42; model.settings.deviceY = 0.61
         model.jpeg = true
         let expected = model.fingerprint
         let selected = model.selectedScreenshotID
@@ -79,6 +80,10 @@ struct ProjectChecks {
         precondition(reopened.isDirty, "Moving headline must dirty project")
         reopened.settings.headline.x = 0.38
         precondition(!reopened.isDirty, "Restoring saved headline position must clear dirty state")
+        reopened.settings.deviceY = 0.7
+        precondition(reopened.isDirty, "Moving device must dirty project")
+        reopened.settings.deviceY = 0.61
+        precondition(!reopened.isDirty, "Restoring saved device position must clear dirty state")
         reopened.status = "Transient status"; reopened.error = "Transient error"
         precondition(!reopened.isDirty, "Status/error must not dirty project")
         reopened.selectedScreenshotID = nil

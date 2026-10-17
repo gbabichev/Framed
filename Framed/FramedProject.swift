@@ -10,6 +10,8 @@ struct ProjectSettings: Codable, Equatable {
     var preset: ScreenshotPreset
     var landscape: Bool
     var deviceScale: Double
+    var deviceX: Double?
+    var deviceY: Double?
     var red: Double
     var green: Double
     var blue: Double
@@ -27,6 +29,7 @@ struct ProjectSettings: Codable, Equatable {
     init(_ settings: CompositionSettings) {
         preset = settings.preset; landscape = settings.landscape
         deviceScale = settings.deviceScale
+        deviceX = settings.deviceX; deviceY = settings.deviceY
         transparentBackground = settings.transparentBackground
         effects = settings.effects
         headline = settings.headline
@@ -42,6 +45,7 @@ struct ProjectSettings: Codable, Equatable {
 
     func restored() throws -> CompositionSettings {
         guard (headline ?? HeadlineSettings()).isValid, (effects ?? CompositionEffects()).isValid, ScreenshotPreset.all.contains(preset),
+              (0...1).contains(deviceX ?? 0.5), (0...1).contains(deviceY ?? 0.5),
               (0.4...1).contains(deviceScale), [red, green, blue].allSatisfy({ (0...1).contains($0) }),
               (0...0.9).contains(screenX), (0...0.9).contains(screenY),
               (0.099999...1).contains(screenWidth), (0.099999...1).contains(screenHeight),
@@ -50,6 +54,7 @@ struct ProjectSettings: Codable, Equatable {
         }
         var settings = CompositionSettings()
         settings.preset = preset; settings.landscape = landscape; settings.deviceScale = deviceScale
+        settings.deviceX = deviceX ?? 0.5; settings.deviceY = deviceY ?? 0.5
         settings.background = NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
         settings.transparentBackground = transparentBackground ?? false
         settings.effects = effects ?? CompositionEffects()

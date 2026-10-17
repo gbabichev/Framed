@@ -172,6 +172,7 @@ private struct CompositionPreview: View {
             ZStack {
                 if settings.transparentBackground && !forceOpaque { TransparencyGrid() }
                 Image(decorative: image, scale: 1).resizable()
+                DeviceDragOverlay(screenshot: screenshot, mockup: mockup, settings: $settings)
                 if settings.manualScreen, let mockup {
                     ScreenCalibrationOutline(mockup: mockup, settings: settings)
                 }
@@ -185,6 +186,39 @@ private struct CompositionPreview: View {
         } else {
             ContentUnavailableView("Set the screen area", systemImage: "viewfinder", description: Text("This mockup needs manual screen bounds. Enable Manual screen area in the inspector."))
         }
+    }
+}
+
+private struct DeviceDragOverlay: View {
+    let screenshot: CGImage
+    let mockup: CGImage?
+    @Binding var settings: CompositionSettings
+    @State private var dragOrigin: CGPoint?
+    @State private var hovering = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            let rect = CompositionRenderer.foregroundRect(screenshot: screenshot, mockup: mockup,
+                                                           canvas: geometry.size, settings: settings)
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(.blue.opacity(hovering || dragOrigin != nil ? 0.7 : 0),
+                              style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                .contentShape(Rectangle())
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: geometry.size.height - rect.midY)
+                .onHover { hovering = $0 }
+                .gesture(DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        if dragOrigin == nil { dragOrigin = CGPoint(x: settings.deviceX, y: settings.deviceY) }
+                        guard let origin = dragOrigin else { return }
+                        settings.deviceX = min(1, max(0, origin.x + value.translation.width / geometry.size.width))
+                        settings.deviceY = min(1, max(0, origin.y + value.translation.height / geometry.size.height))
+                    }
+                    .onEnded { _ in dragOrigin = nil })
+                .help("Drag to move the device and screenshot together")
+                .accessibilityLabel("Device position; use the position controls in Appearance for precise placement")
+        }
+        .clipped()
     }
 }
 
@@ -225,8 +259,9 @@ private struct ScreenCalibrationOutline: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let device = CompositionRenderer.deviceRect(image: mockup, canvas: geometry.size,
-                                                         scale: settings.deviceScale)
+            let cgDevice = CompositionRenderer.deviceRect(image: mockup, canvas: geometry.size, settings: settings)
+            let device = CGRect(x: cgDevice.minX, y: geometry.size.height - cgDevice.maxY,
+                                width: cgDevice.width, height: cgDevice.height)
             let bounds = settings.manualBounds
             let width = device.width * bounds.width
             let height = device.height * bounds.height
@@ -445,6 +480,7 @@ private struct LayoutSettings: View {
             Toggle("Transparent background", isOn: $settings.transparentBackground)
             ColorPicker(settings.transparentBackground ? "JPEG background" : "Background", selection: Binding(get: { Color(nsColor: settings.background) }, set: { settings.background = NSColor($0) }), supportsOpacity: false)
             ValueSlider(title: "Device scale", value: $settings.deviceScale, range: 0.4...1)
+            DevicePositionSettings(settings: $settings)
             Picker("Screenshot", selection: $settings.fillScreen) {
                 Text("Fit").tag(false)
                 Text("Fill").tag(true)
@@ -454,6 +490,27 @@ private struct LayoutSettings: View {
                  : "Fit shows the whole screenshot. Different proportions leave black bars inside the device.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct DevicePositionSettings: View {
+    @Binding var settings: CompositionSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Drag the device in the preview to move it with its screenshot.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("Device position") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ValueSlider(title: "Device horizontal position", value: $settings.deviceX, range: 0...1)
+                    ValueSlider(title: "Device vertical position", value: $settings.deviceY, range: 0...1)
+                    Button("Reset Device Position") { settings.resetDevicePosition() }
+                    Text("The center is positioned within the canvas. Device edges can extend beyond it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(.top, 8)
+            }.font(.caption)
         }
     }
 }
@@ -512,7 +569,7 @@ private struct HeadlineSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Headline").font(.headline)
-            Toggle("Show headline", isOn: $settings.headline.enabled)
+            Toggle("Show headline", isOn: $settings.showHeadline)
             if settings.headline.enabled {
                 TextField("First line", text: $settings.headline.firstLineInput)
                     .textFieldStyle(.roundedBorder)
@@ -535,7 +592,7 @@ private struct HeadlineSettingsView: View {
                         .labelsHidden()
                 }
                 ColorPicker("Text color", selection: $settings.headline.pickerColor, supportsOpacity: false)
-                Text("Drag the headline in the preview, or adjust its position below. Reduce device scale to make room above the frame.")
+                Text("Drag the headline or device in the preview, or use their position controls. Reduce device scale for more space.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 ValueSlider(title: "Horizontal position", value: $settings.headline.x, range: 0...1)
