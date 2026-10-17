@@ -320,6 +320,7 @@ private struct CenterGuides: View {
 }
 
 private struct CompositionPreview: View {
+    @Environment(\.displayScale) private var displayScale
     @AppStorage(EditorPreferences.centerGuides) private var showCenterGuides = false
     let screenshot: CGImage
     let mockup: CGImage?
@@ -327,25 +328,30 @@ private struct CompositionPreview: View {
     @Binding var settings: CompositionSettings
     let forceOpaque: Bool
     var body: some View {
-        if let image = try? CompositionRenderer.render(screenshot: screenshot, mockup: mockup, opening: opening,
-                                                       settings: settings, maxDimension: 1000, forceOpaque: forceOpaque) {
-            ZStack {
-                if settings.transparentBackground && !forceOpaque { TransparencyGrid() }
-                Image(decorative: image, scale: 1).resizable()
-                if showCenterGuides { CenterGuides() }
-                DeviceDragOverlay(screenshot: screenshot, mockup: mockup, settings: $settings)
-                if settings.manualScreen, let mockup {
-                    ScreenCalibrationOutline(mockup: mockup, settings: settings)
+        GeometryReader { geometry in
+            let resolution = PreviewResolution.maxDimension(canvas: settings.outputSize, viewport: geometry.size,
+                                                             displayScale: displayScale)
+            if let image = try? CompositionRenderer.render(screenshot: screenshot, mockup: mockup, opening: opening,
+                                                           settings: settings, maxDimension: resolution, forceOpaque: forceOpaque) {
+                ZStack {
+                    if settings.transparentBackground && !forceOpaque { TransparencyGrid() }
+                    Image(decorative: image, scale: displayScale).resizable().interpolation(.high)
+                    if showCenterGuides { CenterGuides() }
+                    DeviceDragOverlay(screenshot: screenshot, mockup: mockup, settings: $settings)
+                    if settings.manualScreen, let mockup {
+                        ScreenCalibrationOutline(mockup: mockup, settings: settings)
+                    }
+                    if settings.headline.enabled {
+                        HeadlineDragOverlay(headline: $settings.headline)
+                    }
                 }
-                if settings.headline.enabled {
-                    HeadlineDragOverlay(headline: $settings.headline)
-                }
-            }
                 .aspectRatio(CGFloat(image.width) / CGFloat(image.height), contentMode: .fit)
                 .shadow(color: .black.opacity(0.15), radius: 16, y: 8)
                 .accessibilityLabel("Composed screenshot preview")
-        } else {
-            ContentUnavailableView("Set the screen area", systemImage: "viewfinder", description: Text("This mockup needs manual screen bounds. Enable Manual screen area in the inspector."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView("Set the screen area", systemImage: "viewfinder", description: Text("This mockup needs manual screen bounds. Enable Manual screen area in the inspector."))
+            }
         }
     }
 }
@@ -961,19 +967,25 @@ private struct ExportDialog: View {
 
 private struct ExportPreview: View {
     let model: EditorModel
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         VStack(spacing: 10) {
-            if let shot = model.selectedScreenshot,
-               let image = try? CompositionRenderer.render(screenshot: shot.image, mockup: model.selectedMockup?.image,
-                                                           opening: model.opening, settings: model.settings,
-                                                           maxDimension: 800, forceOpaque: model.jpeg) {
-                ZStack {
-                    if model.settings.transparentBackground && !model.jpeg { TransparencyGrid() }
-                    Image(decorative: image, scale: 1).resizable()
+            GeometryReader { geometry in
+                let resolution = PreviewResolution.maxDimension(canvas: model.settings.outputSize, viewport: geometry.size,
+                                                                 displayScale: displayScale)
+                if let shot = model.selectedScreenshot,
+                   let image = try? CompositionRenderer.render(screenshot: shot.image, mockup: model.selectedMockup?.image,
+                                                               opening: model.opening, settings: model.settings,
+                                                               maxDimension: resolution, forceOpaque: model.jpeg) {
+                    ZStack {
+                        if model.settings.transparentBackground && !model.jpeg { TransparencyGrid() }
+                        Image(decorative: image, scale: displayScale).resizable().interpolation(.high)
+                    }
+                    .aspectRatio(CGFloat(image.width) / CGFloat(image.height), contentMode: .fit)
+                    .accessibilityLabel("Export preview")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .aspectRatio(CGFloat(image.width) / CGFloat(image.height), contentMode: .fit)
-                .accessibilityLabel("Export preview")
             }
             Text("Preview").font(.caption).foregroundStyle(.secondary)
         }

@@ -331,6 +331,18 @@ nonisolated enum CenterSnapping {
     }
 }
 
+nonisolated enum PreviewResolution {
+    /// Render one source pixel per display pixel for the aspect-fitted canvas.
+    static func maxDimension(canvas: CGSize, viewport: CGSize, displayScale: CGFloat) -> Double {
+        guard canvas.width > 0, canvas.height > 0, viewport.width > 0, viewport.height > 0,
+              [canvas.width, canvas.height, viewport.width, viewport.height, displayScale].allSatisfy(\.isFinite),
+              displayScale > 0 else { return 1 }
+        let fit = min(viewport.width / canvas.width, viewport.height / canvas.height)
+        let native = max(canvas.width, canvas.height)
+        return Double(max(1, min(native, ceil(native * fit * displayScale))))
+    }
+}
+
 nonisolated struct CompositionSettings: Sendable {
     var preset = ScreenshotPreset.all[0]
     var landscape = false
@@ -449,7 +461,7 @@ enum CompositionRenderer {
                        settings: CompositionSettings, maxDimension: Double? = nil, forceOpaque: Bool = false) throws -> CGImage {
         let full = settings.outputSize
         let ratio: CGFloat = maxDimension.map { min(CGFloat(1), CGFloat($0) / max(full.width, full.height)) } ?? 1
-        let size = CGSize(width: (full.width * ratio).rounded(), height: (full.height * ratio).rounded())
+        let size = CGSize(width: max(1, (full.width * ratio).rounded()), height: max(1, (full.height * ratio).rounded()))
         guard let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
                                       bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
