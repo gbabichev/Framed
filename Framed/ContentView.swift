@@ -175,7 +175,28 @@ private struct EmptyCanvas: View {
     }
 }
 
+private enum EditorPreferences {
+    static let centerGuides = "editor.showCenterGuides"
+    static let centerSnapping = "editor.snapToCenter"
+}
+
+private struct CenterGuides: View {
+    var body: some View {
+        Canvas { context, size in
+            var path = Path()
+            path.move(to: CGPoint(x: size.width / 2, y: 0))
+            path.addLine(to: CGPoint(x: size.width / 2, y: size.height))
+            path.move(to: CGPoint(x: 0, y: size.height / 2))
+            path.addLine(to: CGPoint(x: size.width, y: size.height / 2))
+            context.stroke(path, with: .color(.accentColor.opacity(0.7)), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct CompositionPreview: View {
+    @AppStorage(EditorPreferences.centerGuides) private var showCenterGuides = false
     let screenshot: CGImage
     let mockup: CGImage?
     let opening: ScreenOpening?
@@ -187,6 +208,7 @@ private struct CompositionPreview: View {
             ZStack {
                 if settings.transparentBackground && !forceOpaque { TransparencyGrid() }
                 Image(decorative: image, scale: 1).resizable()
+                if showCenterGuides { CenterGuides() }
                 DeviceDragOverlay(screenshot: screenshot, mockup: mockup, settings: $settings)
                 if settings.manualScreen, let mockup {
                     ScreenCalibrationOutline(mockup: mockup, settings: settings)
@@ -205,6 +227,7 @@ private struct CompositionPreview: View {
 }
 
 private struct DeviceDragOverlay: View {
+    @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
     let screenshot: CGImage
     let mockup: CGImage?
     @Binding var settings: CompositionSettings
@@ -226,8 +249,10 @@ private struct DeviceDragOverlay: View {
                     .onChanged { value in
                         if dragOrigin == nil { dragOrigin = CGPoint(x: settings.deviceX, y: settings.deviceY) }
                         guard let origin = dragOrigin else { return }
-                        settings.deviceX = min(1, max(0, origin.x + value.translation.width / geometry.size.width))
-                        settings.deviceY = min(1, max(0, origin.y + value.translation.height / geometry.size.height))
+                        let candidate = CGPoint(x: min(1, max(0, origin.x + value.translation.width / geometry.size.width)),
+                                                y: min(1, max(0, origin.y + value.translation.height / geometry.size.height)))
+                        let snapped = CenterSnapping.position(candidate, canvas: geometry.size, enabled: snapToCenter)
+                        settings.deviceX = snapped.x; settings.deviceY = snapped.y
                     }
                     .onEnded { _ in dragOrigin = nil })
                 .help("Drag to move the device and screenshot together")
@@ -238,6 +263,7 @@ private struct DeviceDragOverlay: View {
 }
 
 private struct HeadlineDragOverlay: View {
+    @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
     @Binding var headline: HeadlineSettings
     @State private var dragOrigin: CGPoint?
     @State private var hovering = false
@@ -257,8 +283,10 @@ private struct HeadlineDragOverlay: View {
                             if dragOrigin == nil { dragOrigin = CGPoint(x: layout.rect.midX, y: layout.rect.midY) }
                             guard let origin = dragOrigin else { return }
                             let halfWidth = layout.rect.width / 2, halfHeight = layout.rect.height / 2
-                            headline.x = min(geometry.size.width - halfWidth, max(halfWidth, origin.x + value.translation.width)) / geometry.size.width
-                            headline.y = min(geometry.size.height - halfHeight, max(halfHeight, origin.y + value.translation.height)) / geometry.size.height
+                            let candidate = CGPoint(x: min(geometry.size.width - halfWidth, max(halfWidth, origin.x + value.translation.width)) / geometry.size.width,
+                                                    y: min(geometry.size.height - halfHeight, max(halfHeight, origin.y + value.translation.height)) / geometry.size.height)
+                            let snapped = CenterSnapping.position(candidate, canvas: geometry.size, enabled: snapToCenter)
+                            headline.x = snapped.x; headline.y = snapped.y
                         }
                         .onEnded { _ in dragOrigin = nil })
                     .help("Drag to move the headline")
@@ -547,6 +575,8 @@ private struct ScreenCalibrationSettings: View {
 }
 
 private struct LayoutSettings: View {
+    @AppStorage(EditorPreferences.centerGuides) private var showCenterGuides = false
+    @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
     @Binding var settings: CompositionSettings
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -554,6 +584,11 @@ private struct LayoutSettings: View {
             ColorPicker(settings.transparentBackground ? "JPEG background" : "Background", selection: Binding(get: { Color(nsColor: settings.background) }, set: { settings.background = NSColor($0) }), supportsOpacity: false)
             ValueSlider(title: "Device scale", value: $settings.deviceScale, range: 0.4...1)
             DevicePositionSettings(settings: $settings)
+            InspectorSwitch("Show center guides", isOn: $showCenterGuides)
+            InspectorSwitch("Snap to center", isOn: $snapToCenter)
+            Text("Guides and snapping are editing aids. Drag near either center line to align the device or headline.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Picker("Screenshot", selection: $settings.fillScreen) {
                 Text("Fit").tag(false)
                 Text("Fill").tag(true)

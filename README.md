@@ -155,3 +155,12 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPres
 ```
 
 The export sheet stays open after saving, shows completion or batch progress, and provides Done to close it. Canceling the destination picker returns to the settings. Frame import remains available in the Device frame card and Frame Library.
+
+## Center guides and snapping
+
+Appearance offers Show center guides and Snap to center. Guides draw the canvas’s horizontal and vertical center lines only in the editor. Device and headline dragging snap each axis independently when their center is within 8 preview points of the canvas center; dragging farther releases the snap. Disable snapping for fine positioning. These app preferences are remembered across sessions without marking projects dirty. Guides are excluded from the export preview and output files.
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Tests/CenterSnappingChecks.swift -o /tmp/framed-snapping-checks
+/tmp/framed-snapping-checks
+```

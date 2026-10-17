@@ -319,6 +319,18 @@ enum HeadlineRenderer {
     }
 }
 
+nonisolated enum CenterSnapping {
+    /// Use preview points so the magnetic zone feels consistent at any canvas size.
+    static func position(_ point: CGPoint, canvas: CGSize, enabled: Bool, threshold: CGFloat = 8) -> CGPoint {
+        guard enabled else { return point }
+        func snap(_ value: CGFloat, extent: CGFloat) -> CGFloat {
+            guard extent.isFinite, extent > 0 else { return value }
+            return abs(value - 0.5) * extent <= threshold ? 0.5 : value
+        }
+        return CGPoint(x: snap(point.x, extent: canvas.width), y: snap(point.y, extent: canvas.height))
+    }
+}
+
 struct CompositionSettings {
     var preset = ScreenshotPreset.all[0]
     var landscape = false
