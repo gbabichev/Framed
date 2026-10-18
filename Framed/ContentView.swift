@@ -621,7 +621,7 @@ private struct HeadlineDragOverlay: View {
                         }
                         .onEnded { _ in dragOrigin = nil; editor.endEditing() })
                     .help("Drag to move the headline")
-                    .accessibilityLabel("Move headline; position controls are also available in the inspector")
+                    .accessibilityLabel("Drag to move the headline; reset position is available in the inspector")
             }
         }
         .onDisappear { if dragOrigin != nil { dragOrigin = nil; editor.endEditing() } }
@@ -1154,38 +1154,80 @@ private struct HeadlineSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            InspectorSwitch("Show headline", isOn: $settings.showHeadline)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Show headline").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    InspectorInfo(text: "Add up to two lines of text. Drag the headline in the preview to move it. Reduce device scale to leave more room above the device.")
+                }
+                HStack {
+                    Toggle("Show headline", isOn: $settings.showHeadline)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.regular)
+                    Spacer()
+                    if settings.headline.enabled {
+                        ColorPicker("Headline color", selection: $settings.headline.pickerColor, supportsOpacity: false)
+                            .labelsHidden()
+                            .help("Headline text color")
+                    }
+                }
+            }
             if settings.headline.enabled {
                 TextField("First line", text: $settings.headline.firstLineInput)
                     .textFieldStyle(.roundedBorder)
-                TextField("Second line (optional)", text: $settings.headline.secondLineInput)
+                TextField("Subheadline (optional)", text: $settings.headline.secondLineInput)
                     .textFieldStyle(.roundedBorder)
-                Picker("Font", selection: $settings.headline.fontFamily) {
-                    Text("System").tag("")
-                    ForEach(HeadlineFontCatalog.families, id: \.self) { Text($0).tag($0) }
-                }
-                Picker("Weight", selection: $settings.headline.weight) {
-                    ForEach(HeadlineWeight.allCases) { Text($0.title).tag($0) }
-                }
-                HStack {
-                    Text("Size (pixels)")
-                    Spacer()
-                    TextField("Font size", value: $settings.headlineFontSize, format: .number.precision(.fractionLength(0)))
-                        .frame(width: 55).textFieldStyle(.roundedBorder)
-                    Stepper("Font size", value: $settings.headlineFontSize,
-                            in: settings.outputSize.width * 0.01...settings.outputSize.width * 0.15, step: 1)
+                    .help("Subheadline text is always 75% of the main headline size.")
+                Divider()
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
+                    GridRow {
+                        Text("Font").font(.subheadline.weight(.semibold))
+                        Picker("Font", selection: $settings.headline.fontFamily) {
+                            Text("System").tag("")
+                            ForEach(HeadlineFontCatalog.families, id: \.self) { Text($0).tag($0) }
+                        }
                         .labelsHidden()
+                        .frame(maxWidth: .infinity)
+                    }
+                    GridRow {
+                        Text("Weight").font(.subheadline.weight(.semibold))
+                        Picker("Weight", selection: $settings.headline.weight) {
+                            ForEach(HeadlineWeight.allCases) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity)
+                    }
+                    GridRow {
+                        Text("Size").font(.subheadline.weight(.semibold))
+                        HStack(spacing: 6) {
+                            TextField("Font size in pixels", value: $settings.headlineFontSize,
+                                      format: .number.precision(.fractionLength(0)))
+                                .textFieldStyle(.roundedBorder)
+                                .monospacedDigit()
+                            Text("px").font(.caption).foregroundStyle(.secondary)
+                            Stepper("Font size in pixels", value: $settings.headlineFontSize,
+                                    in: settings.outputSize.width * 0.01...settings.outputSize.width * 0.15, step: 1)
+                                .labelsHidden()
+                        }
+                        .help("Text size in export pixels. Scales proportionally when the canvas size changes.")
+                    }
                 }
-                ColorPicker("Text color", selection: $settings.headline.pickerColor, supportsOpacity: false)
-                Text("Drag the headline or device in the preview, or use their position controls. Reduce device scale for more space.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                ValueSlider(title: "Horizontal position", value: $settings.headline.x, range: 0...1)
-                ValueSlider(title: "Vertical position", value: $settings.headline.y, range: 0...1)
-                Button("Reset Position") {
-                    editor.beginEditing("Reset Headline Position")
-                    defer { editor.endEditing() }
-                    settings.headline.x = 0.5; settings.headline.y = 0.055
+                Divider()
+                HStack {
+                    Text("Headline position").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Button("Reset Headline Position", systemImage: "arrow.counterclockwise") {
+                        editor.beginEditing("Reset Headline Position")
+                        defer { editor.endEditing() }
+                        var headline = settings.headline
+                        headline.x = 0.5; headline.y = 0.055
+                        settings.headline = headline
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help("Reset headline to the top center")
+                    InspectorInfo(text: "Drag the headline in the preview to position it. Reset returns it to the top center of the canvas. Center guides and snapping also apply to the headline.")
                 }
             }
         }

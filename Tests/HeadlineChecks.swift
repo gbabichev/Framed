@@ -13,6 +13,15 @@ struct HeadlineChecks {
         headline.y = 0.15
         let layout = HeadlineRenderer.layout(headline, canvas: canvas)!
         precondition(layout.lines.count == 2 && layout.rect.minY > 0)
+        var equalText = headline
+        equalText.firstLine = "Matching text"; equalText.secondLine = "Matching text"
+        let proportional = HeadlineRenderer.layout(equalText, canvas: canvas)!
+        precondition(abs(proportional.widths[1] / proportional.widths[0] - 0.75) < 0.01,
+                     "Subheadline must render at 75% of the main headline size")
+        equalText.firstLine = ""
+        let subheadlineOnly = HeadlineRenderer.layout(equalText, canvas: canvas)!
+        precondition(abs(subheadlineOnly.widths[0] - proportional.widths[1]) < 0.01,
+                     "An empty main headline must not promote the subheadline to full size")
         let half = HeadlineRenderer.layout(headline, canvas: CGSize(width: 400, height: 800))!
         precondition(abs(half.rect.midX * 2 - layout.rect.midX) < 0.01 && abs(half.rect.height * 2 - layout.rect.height) < 0.01,
                      "Preview and export text geometry must scale consistently")
