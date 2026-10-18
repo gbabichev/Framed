@@ -224,11 +224,13 @@ nonisolated enum ProjectFileWorker {
         }
         var sections = project.deviceSections ?? []
         var memberships: [UUID: UUID] = [:]
-        guard Set(sections.map(\.id)).count == sections.count,
-              Set(sections.map(\.device)).count == sections.count else {
+        guard Set(sections.map(\.id)).count == sections.count else {
             throw FramedError.message("This project contains duplicate device sections.")
         }
         for section in sections {
+            guard section.name.map({ $0.count <= 80 && !$0.contains(where: { $0.isNewline }) }) ?? true else {
+                throw FramedError.message("This project contains an invalid device section name.")
+            }
             _ = try section.settings.restored()
             guard section.mockupID == nil || frames.contains(where: { $0.id == section.mockupID }) else {
                 throw FramedError.message("A device layout refers to a missing frame.")

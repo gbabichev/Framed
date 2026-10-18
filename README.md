@@ -19,7 +19,7 @@ Framed turns screenshots from your device or simulator into finished images for 
 - **Bring your own frames.** Import front-facing, transparent PNG device frames. Framed detects the screen opening and preserves the bezel and camera cutouts.
 - **Import once, reuse later.** Keep frames in a reusable library with visual previews, search, one-click Watch, iPhone, iPad, and Mac filters, renaming, and bulk management.
 - **Match your canvas.** Selecting a frame chooses a canvas from the matching device family. You can change the size and orientation afterward.
-- **Organize by device.** Keep iPhone, iPad, Mac, Apple Watch, and Apple TV screenshots in collapsible sections, each with a default layout for new imports.
+- **Organize by device.** Keep iPhone, iPad, Mac, Apple Watch, and Apple TV screenshots in collapsible sections, each with a default layout for new imports. Add multiple sections for the same device, such as iPad Portrait and iPad Landscape, and rename or duplicate their layouts.
 - **Give every screenshot its own layout.** Choose a separate frame, background, headline, position, and effects for each image. Duplicate screenshots, reorder them, or copy a style across your set.
 - **Add a headline.** Use up to two lines of text with your choice of font, size, weight, color, and position.
 - **Style the scene.** Choose a background color or transparency, add a corner glow, and fade the device into the background.

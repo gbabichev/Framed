@@ -126,11 +126,55 @@ final class EditorModel {
         selectedSidebarItems = [.device(id)]
     }
     func addDeviceSection(_ device: ProjectDevice) {
-        if let existing = deviceSections.first(where: { $0.device == device }) { selectDeviceSection(existing.id); return }
         beginEditing("Add Device")
         defer { endEditing() }
-        let section = DeviceSection(device: device, settings: ProjectSettings(device.defaultSettings))
+        let section = DeviceSection(device: device, name: uniqueSectionName(device.title), settings: ProjectSettings(device.defaultSettings))
         deviceSections.append(section); selectDeviceSection(section.id)
+    }
+    private func uniqueSectionName(_ base: String, excluding id: UUID? = nil) -> String {
+        let names = Set(deviceSections.filter { $0.id != id }.map { $0.title.lowercased() })
+        var candidate = base
+        var suffix = 2
+        while names.contains(candidate.lowercased()) {
+            candidate = "\(base.prefix(72)) \(suffix)"; suffix += 1
+        }
+        return candidate
+    }
+    func renameDeviceSection(_ id: UUID, to name: String) {
+        guard let index = deviceSections.firstIndex(where: { $0.id == id }) else { return }
+        let cleaned = String(name.components(separatedBy: .newlines).joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        guard !cleaned.isEmpty else { return }
+        let unique = uniqueSectionName(cleaned, excluding: id)
+        guard deviceSections[index].title != unique else { return }
+        recordEdit("Rename Device Section")
+        deviceSections[index].name = unique
+    }
+    func duplicateDeviceLayout(_ id: UUID) {
+        guard let index = deviceSections.firstIndex(where: { $0.id == id }) else { return }
+        beginEditing("Duplicate Device Layout")
+        defer { endEditing() }
+        var copy = deviceSections[index]
+        copy.id = UUID(); copy.name = uniqueSectionName(copy.title + " copy")
+        deviceSections.insert(copy, at: index + 1)
+        selectDeviceSection(copy.id)
+    }
+    var deviceExportFolderNames: [UUID: String] {
+        var result: [UUID: String] = [:]
+        var used: Set<String> = []
+        for section in deviceSections {
+            let cleaned = section.title.replacingOccurrences(of: "/", with: "-")
+                .replacingOccurrences(of: ":", with: "-")
+                .replacingOccurrences(of: "\\", with: "-")
+                .components(separatedBy: .controlCharacters).joined()
+                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
+            let base = cleaned.isEmpty ? section.device.title : cleaned
+            var name = base
+            var suffix = 2
+            while used.contains(name.lowercased()) { name = "\(base) \(suffix)"; suffix += 1 }
+            result[section.id] = name; used.insert(name.lowercased())
+        }
+        return result
     }
     func useScreenshotAsDefault(_ id: UUID) {
         guard let sectionID = memberships[id], let index = deviceSections.firstIndex(where: { $0.id == sectionID }) else { return }
@@ -981,8 +1025,9 @@ final class EditorModel {
             guard response == .OK, let directory = panel.url else { return }
             onStart()
             let access = directory.startAccessingSecurityScopedResource()
+            let folders = deviceExportFolderNames
             let jobs = screenshotsForExport(scope).map { shot in
-                (shot, layout(for: shot.id), scope == .project ? deviceSections.first { $0.id == memberships[shot.id] }?.device.title : nil)
+                (shot, layout(for: shot.id), scope == .project ? memberships[shot.id].flatMap { folders[$0] } : nil)
             }
             let frames = mockups, masks = openings, useJPEG = jpeg
             isBusy = true

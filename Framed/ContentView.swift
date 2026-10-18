@@ -149,11 +149,20 @@ private struct ProjectOpenProgress: View {
 private struct ScreenshotSidebar: View {
     @Bindable var model: EditorModel
     @State private var isDropTargeted = false
+    @State private var pendingRemoval: DeviceSection?
+    @State private var pendingApply: DeviceSection?
+    @State private var pendingRename: DeviceSection?
+    @State private var sectionName = ""
 
     var body: some View {
         List(selection: $model.sidebarSelections) {
             ForEach(model.sidebarGroups) { group in
-                DeviceSidebarSection(model: model, group: group)
+                DeviceSidebarSection(model: model, group: group,
+                    requestRemoval: { pendingRemoval = $0 },
+                    requestApply: { pendingApply = $0 },
+                    requestRename: { section in
+                        sectionName = section.title; pendingRename = section
+                    })
             }
         }
         .listStyle(.sidebar)
@@ -183,6 +192,42 @@ private struct ScreenshotSidebar: View {
                     .padding(4).allowsHitTesting(false)
             }
         }
+        .confirmationDialog("Remove this device and its screenshots?", isPresented: Binding(
+            get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })) {
+            if let section = pendingRemoval {
+                Button("Remove Device", role: .destructive) {
+                    pendingRemoval = nil
+                    model.removeDeviceSection(section.id)
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text("Removes \(pendingRemoval?.title ?? "this device") and its screenshots. This can be undone.")
+        }
+        .confirmationDialog("Apply this device’s default layout?", isPresented: Binding(
+            get: { pendingApply != nil }, set: { if !$0 { pendingApply = nil } })) {
+            if let section = pendingApply {
+                Button("Apply Layout") {
+                    pendingApply = nil
+                    model.applyDeviceLayout(section.id)
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingApply = nil }
+        } message: {
+            Text("Updates frames, canvas, appearance, headline styling, and effects in this section. Each screenshot’s headline text is kept.")
+        }
+        .alert("Rename Device Section", isPresented: Binding(
+            get: { pendingRename != nil }, set: { if !$0 { pendingRename = nil } })) {
+            TextField("Name", text: $sectionName)
+            Button("Cancel", role: .cancel) { pendingRename = nil }
+            if let section = pendingRename {
+                Button("Rename") {
+                    pendingRename = nil
+                    model.renameDeviceSection(section.id, to: sectionName)
+                }
+                .disabled(sectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
     }
 }
 
@@ -190,8 +235,9 @@ private struct DeviceSidebarSection: View {
     @Bindable var model: EditorModel
     let group: DeviceSidebarGroup
     @State private var expanded = true
-    @State private var confirmApply = false
-    @State private var confirmRemove = false
+    let requestRemoval: (DeviceSection) -> Void
+    let requestApply: (DeviceSection) -> Void
+    let requestRename: (DeviceSection) -> Void
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -227,9 +273,11 @@ private struct DeviceSidebarSection: View {
                 Button {
                     model.selectDeviceSection(group.id)
                 } label: {
-                    Label(group.section.device.title, systemImage: group.section.device.symbol)
+                    Label(group.section.title, systemImage: group.section.device.symbol)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .help(group.section.title)
                 }
                 .buttonStyle(.plain)
                 Spacer()
@@ -243,13 +291,15 @@ private struct DeviceSidebarSection: View {
             .padding(.vertical, 5)
             .contextMenu {
                 Button("Edit Default Layout") { model.selectDeviceSection(group.id) }
+                Button("Rename…") { requestRename(group.section) }
+                Button("Duplicate Device Layout") { model.duplicateDeviceLayout(group.id) }
                 Button("Import Screenshots…") {
                     model.selectDeviceSection(group.id); model.importImages(mockups: false)
                 }
-                Button("Apply Default Layout to Screenshots…") { confirmApply = true }
+                Button("Apply Default Layout to Screenshots…") { requestApply(group.section) }
                     .disabled(group.screenshots.isEmpty)
                 Divider()
-                Button("Remove Device…", role: .destructive) { confirmRemove = true }
+                Button("Remove Device…", role: .destructive) { requestRemoval(group.section) }
             }
             .contentShape(Rectangle())
             .background(isDropTargeted ? Color.accentColor.opacity(0.12) : Color.clear,
@@ -258,14 +308,7 @@ private struct DeviceSidebarSection: View {
                 acceptDrop(providers)
             }
         }
-        .confirmationDialog("Apply this device’s default layout?", isPresented: $confirmApply) {
-            Button("Apply Layout") { model.applyDeviceLayout(group.id) }
-        } message: {
-            Text("Updates frames, canvas, appearance, headline styling, and effects in this section. Each screenshot’s headline text is kept.")
-        }
-        .confirmationDialog("Remove this device and its screenshots?", isPresented: $confirmRemove) {
-            Button("Remove Device", role: .destructive) { model.removeDeviceSection(group.id) }
-        } message: { Text("This can be undone.") }
+
     }
     private func acceptDrop(_ providers: [NSItemProvider], at destination: Int? = nil) -> Bool {
         let accepted = model.handleSidebarDrop(providers, sectionID: group.id, at: destination)
@@ -298,7 +341,7 @@ private struct DeviceScreenshotRow: View {
                 Button("Move Down") { model.moveScreenshot(shot.id, by: 1) }
                 Menu("Move to Device") {
                     ForEach(model.deviceSections) { section in
-                        Button(section.device.title, systemImage: section.device.symbol) {
+                        Button(section.title, systemImage: section.device.symbol) {
                             model.moveScreenshots(Set(model.screenshotIDsToMove(startingAt: shot.id)), toSection: section.id)
                         }
                     }
@@ -413,7 +456,7 @@ private struct PreviewPane: View {
                 if model.isBusy { ProgressView().controlSize(.small) }
                 Text(panEnabled ? "Drag to pan. Turn off the hand tool to edit the layout."
                      : model.selectedScreenshotID == nil && model.activeSection != nil
-                        ? "Editing \(model.activeSection!.device.title) default layout · New screenshots inherit this layout." : model.status)
+                        ? "Editing \(model.activeSection!.title) default layout · New screenshots inherit this layout." : model.status)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
 
@@ -907,13 +950,13 @@ private struct DeviceDefaultLayoutActions: View {
     var body: some View {
         InspectorCard("Default Layout", systemImage: "slider.horizontal.3") {
             HStack {
-                Text(section.device.title).font(.subheadline.weight(.semibold))
+                Text(section.title).font(.subheadline.weight(.semibold))
                 Spacer()
                 InspectorInfo(text: "Changes here become the default for new screenshots. Apply the layout to update existing screenshots in this device section, keeping their individual headline text.")
             }
             Button("Apply to Existing Screenshots…") { confirmApply = true }
                 .disabled(screenshotCount == 0)
-                .help("Apply this layout to \(screenshotCount) screenshots in \(section.device.title)")
+                .help("Apply this layout to \(screenshotCount) screenshots in \(section.title)")
         }
         .confirmationDialog("Apply layout to \(screenshotCount) screenshots?", isPresented: $confirmApply) {
             Button("Apply Layout") { model.applyDeviceLayout(section.id) }
@@ -1563,7 +1606,7 @@ private struct ExportScreenshotSettings: View {
             }
             .labelsHidden()
             Text(scope == .project ? "Organized into device folders in the folder you choose."
-                 : scope == .device ? "\(model.activeSection?.device.title ?? "Device") screenshots, in sidebar order."
+                 : scope == .device ? "\(model.activeSection?.title ?? "Device") screenshots, in sidebar order."
                  : model.selectedScreenshot?.name ?? "No screenshot selected")
                 .font(.caption).foregroundStyle(.secondary)
                 .lineLimit(2)

@@ -46,7 +46,9 @@ struct DeviceSectionChecks {
         model.selectDeviceSection(phone)
         precondition(model.settings.deviceScale == 0.5)
         model.addDeviceSection(.iPhone)
-        precondition(model.deviceSections.count == 2, "Adding an existing family selects its section")
+        precondition(model.deviceSections.count == 3 && model.activeSection?.id != phone,
+                     "Adding an existing family creates an independent section")
+        model.selectDeviceSection(phone)
         let path = root.appendingPathComponent("Devices.framed")
         precondition(model.writeProject(to: path))
         let saved = model.fingerprint
@@ -69,7 +71,7 @@ struct DeviceSectionChecks {
         invalid.layouts![0].sectionID = UUID()
         do { _ = try ProjectFileWorker.prepare(invalid); fatalError("Dangling section accepted") } catch is FramedError { }
         model.removeDeviceSection(mac)
-        precondition(model.screenshots.count == 2 && model.deviceSections.count == 1)
+        precondition(model.screenshots.count == 2 && model.deviceSections.count == 2)
         model.undo()
         precondition(model.fingerprint == saved, "Removing a device undoes its screenshots and defaults together")
         model.releaseProjectAccess(); reopened.releaseProjectAccess()

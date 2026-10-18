@@ -40,8 +40,13 @@ nonisolated enum ProjectDevice: String, Codable, CaseIterable, Identifiable, Sen
 nonisolated struct DeviceSection: Codable, Equatable, Identifiable, Sendable {
     var id = UUID()
     var device: ProjectDevice
+    var name: String? = nil
     var settings: ProjectSettings
     var mockupID: UUID?
+    var title: String {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? device.title : trimmed
+    }
 }
 
 struct DeviceSidebarGroup: Identifiable {
