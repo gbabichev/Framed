@@ -609,7 +609,7 @@ nonisolated enum CompositionRenderer {
                                        settings: CompositionSettings, size: CGSize, context: CGContext) throws {
         if let mockup {
             let device = deviceRect(image: mockup, canvas: size, settings: settings)
-            guard let screenshot else {
+            if screenshot == nil && !(settings.desktop.enabled && (settings.manualScreen || opening != nil)) {
                 context.draw(mockup, in: device)
                 return
             }
@@ -630,7 +630,7 @@ nonisolated enum CompositionRenderer {
             }
             if settings.desktop.enabled {
                 drawDesktop(screenshot: screenshot, in: screen, settings: settings.desktop, context: context)
-            } else {
+            } else if let screenshot {
                 context.setFillColor(CGColor(gray: 0, alpha: 1))
                 context.fill(device)
                 // The refined mask extends one detection pixel beneath the bezel so
@@ -653,7 +653,7 @@ nonisolated enum CompositionRenderer {
         }
     }
 
-    private static func drawDesktop(screenshot: CGImage, in screen: CGRect,
+    private static func drawDesktop(screenshot: CGImage?, in screen: CGRect,
                                     settings: DesktopSettings, context: CGContext) {
         if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
                                      colors: [settings.topColor.cgColor, settings.bottomColor.cgColor] as CFArray,
@@ -662,6 +662,7 @@ nonisolated enum CompositionRenderer {
                                        end: CGPoint(x: screen.maxX, y: screen.minY),
                                        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
         }
+        guard let screenshot else { return }
         let scale = min(screen.width / Double(screenshot.width), screen.height / Double(screenshot.height))
             * settings.windowScale
         let width = Double(screenshot.width) * scale, height = Double(screenshot.height) * scale

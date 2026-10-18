@@ -636,15 +636,22 @@ private struct InspectorCard<Content: View>: View {
 
 private struct InspectorSwitch: View {
     let title: LocalizedStringKey
+    let info: String?
     @Binding var isOn: Bool
 
-    init(_ title: LocalizedStringKey, isOn: Binding<Bool>) {
-        self.title = title; _isOn = isOn
+    init(_ title: LocalizedStringKey, isOn: Binding<Bool>, info: String? = nil) {
+        self.title = title; _isOn = isOn; self.info = info
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
+            HStack {
+                Text(title)
+                if let info {
+                    Spacer(minLength: 4)
+                    InspectorInfo(text: info)
+                }
+            }
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
@@ -655,14 +662,27 @@ private struct InspectorSwitch: View {
     }
 }
 
+private struct InspectorInfo: View {
+    let text: String
+
+    var body: some View {
+        Image(systemName: "info.circle")
+            .foregroundStyle(.secondary)
+            .help(text)
+            .accessibilityLabel(text)
+    }
+}
+
 private struct InspectorPane: View {
     @Bindable var model: EditorModel
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 18) {
-                    InspectorCard("Device Frame", systemImage: "iphone", headerAction: { model.importImages(mockups: true) }) {
+                    InspectorCard("Device & Canvas", systemImage: "iphone") {
                         MockupSettings(model: model)
+                        Divider()
+                        OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
                     }
                     InspectorCard("Appearance", systemImage: "paintpalette") {
                         LayoutSettings(hasFrame: model.selectedMockup != nil, settings: $model.settings)
@@ -672,9 +692,6 @@ private struct InspectorPane: View {
                     }
                     InspectorCard("Effects", systemImage: "sparkles") {
                         EffectsSettings(effects: $model.settings.effects)
-                    }
-                    InspectorCard("Export Canvas", systemImage: "rectangle") {
-                        OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
                     }
                     if !model.warnings.isEmpty {
                         InspectorCard("Checks", systemImage: "exclamationmark.triangle") {
@@ -700,8 +717,13 @@ private struct OutputSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("The final image size, including the frame and background.")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Label("Canvas", systemImage: "rectangle")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                InspectorInfo(text: "The final image size, including the frame and background."
+                              + (suggestion?.size == settings.outputSize ? " Canvas matched to device frame." : ""))
+            }
             Text(settings.preset.name)
                 .font(.callout).lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -715,16 +737,17 @@ private struct OutputSettings: View {
             }
             .menuStyle(.borderedButton)
             .help("Choose an App Store screenshot size")
-            Picker("Orientation", selection: Binding(
-                get: { settings.outputSize.width > settings.outputSize.height },
-                set: { settings.landscape = $0 })) {
-                Text("Portrait").tag(false)
-                Text("Landscape").tag(true)
+            if settings.preset.width < settings.preset.height {
+                Picker("Orientation", selection: Binding(
+                    get: { settings.outputSize.width > settings.outputSize.height },
+                    set: { settings.landscape = $0 })) {
+                    Text("Portrait").tag(false)
+                    Text("Landscape").tag(true)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .disabled(settings.preset.width >= settings.preset.height)
-            if let suggestion {
+            if let suggestion, suggestion.size != settings.outputSize {
                 CanvasSuggestion(settings: $settings, suggestion: suggestion)
             }
             Link("App Store size requirements", destination: ScreenshotPreset.source)
@@ -767,37 +790,34 @@ private struct MockupSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button { model.isShowingFrameLibrary = true } label: {
-                HStack(spacing: 12) {
-                    FrameThumbnail(image: model.selectedMockup?.image)
-                        .frame(width: 72, height: 64)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(model.selectedMockup == nil ? "Choose a frame…" : "Change frame…")
-                        Text("\(model.frameLibrary.frames.count) saved frames")
+                HStack(spacing: 10) {
+                    FrameThumbnail(image: model.selectedMockup?.image, imagePadding: 3)
+                        .frame(width: 56, height: 56)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.selectedMockup == nil ? "Choose Frame…" : "Change Frame…")
+                            .font(.callout.weight(.medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(model.selectedFrameDisplayName ?? model.selectedMockup?.name
+                             ?? "\(model.frameLibrary.frames.count) saved frames")
                             .font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
-                }.padding(6)
+                }
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.bordered)
-            if let mockup = model.selectedMockup {
-                Text(model.selectedFrameDisplayName ?? mockup.name).font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            .help("Choose a device frame from your Frame Library")
+            if model.selectedMockup != nil {
                 if !model.selectedFrameIsInLibrary {
                     Button("Save this frame to library") { model.saveSelectedFrameToLibraryInBackground() }
                         .font(.caption)
                 }
-                if model.opening != nil && !model.settings.manualScreen {
-                    Label("Screen detected", systemImage: "checkmark.circle")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
                 ScreenCalibrationSettings(model: model)
-                Divider()
-                DesktopBackdropSettings(desktop: $model.settings.desktop)
-            } else {
-                Text("Import a front-facing PNG with a transparent screen.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -834,28 +854,52 @@ private struct ScreenCalibrationSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Automatic detection is recommended.")
-                .foregroundStyle(.secondary)
-            InspectorSwitch("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled)
+            InspectorSwitch("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled,
+                            info: model.opening != nil
+                                ? "Screen detected. Automatic detection is recommended. Enable manual adjustment to change the screen opening."
+                                : "Automatic detection is recommended. If the screen opening wasn’t detected, enable manual adjustment to set its size.")
             if model.settings.manualScreen {
                 if model.opening != nil {
                     Button("Reset to Detected Screen") { model.resetScreenCalibration() }
                 }
-                Text("Adjust the blue outline to match the screen opening. Edges are percentages of the frame image.")
+                Text("Adjust the blue outline’s width and height. Opposite edges move together, keeping the screen centered in its current position.")
                     .foregroundStyle(.secondary)
-                ValueSlider(title: "Left edge", value: $model.settings.screenLeft,
-                            range: 0...max(0.001, model.settings.screenRight - 0.1))
-                ValueSlider(title: "Right edge", value: $model.settings.screenRight,
-                            range: min(0.999, model.settings.screenLeft + 0.1)...1)
-                ValueSlider(title: "Top edge", value: $model.settings.screenTop,
-                            range: 0...max(0.001, model.settings.screenBottom - 0.1))
-                ValueSlider(title: "Bottom edge", value: $model.settings.screenBottom,
-                            range: min(0.999, model.settings.screenTop + 0.1)...1)
+                ValueSlider(title: "Width", value: screenSize(horizontal: true),
+                            range: 0.1...maximumScreenSize(horizontal: true))
+                ValueSlider(title: "Height", value: screenSize(horizontal: false),
+                            range: 0.1...maximumScreenSize(horizontal: false))
                 ValueSlider(title: "Corner rounding", value: $model.settings.cornerRadius, range: 0...0.25)
                 Text("Manual calibration uses rounded corners. Automatic detection also preserves camera cutouts.")
                     .foregroundStyle(.secondary)
             }
         }.font(.caption)
+    }
+
+    private func maximumScreenSize(horizontal: Bool) -> Double {
+        let center = horizontal
+            ? (model.settings.screenLeft + model.settings.screenRight) / 2
+            : (model.settings.screenTop + model.settings.screenBottom) / 2
+        return max(0.1, 2 * min(center, 1 - center))
+    }
+
+    private func screenSize(horizontal: Bool) -> Binding<Double> {
+        Binding {
+            horizontal ? model.settings.screenRight - model.settings.screenLeft
+                : model.settings.screenBottom - model.settings.screenTop
+        } set: { value in
+            var settings = model.settings
+            let half = min(max(value, 0.1), maximumScreenSize(horizontal: horizontal)) / 2
+            if horizontal {
+                let center = (settings.screenLeft + settings.screenRight) / 2
+                settings.screenLeft = center - half
+                settings.screenRight = center + half
+            } else {
+                let center = (settings.screenTop + settings.screenBottom) / 2
+                settings.screenTop = center - half
+                settings.screenBottom = center + half
+            }
+            model.settings = settings
+        }
     }
 }
 
@@ -868,6 +912,9 @@ private struct LayoutSettings: View {
         VStack(alignment: .leading, spacing: 12) {
             InspectorSwitch("Transparent background", isOn: $settings.transparentBackground)
             ColorPicker(settings.transparentBackground ? "JPEG background" : "Background", selection: Binding(get: { Color(nsColor: settings.background) }, set: { settings.background = NSColor($0) }), supportsOpacity: false)
+            Divider()
+            DesktopBackdropSettings(desktop: $settings.desktop)
+            Divider()
             ValueSlider(title: "Device scale", value: $settings.deviceScale, range: 0.4...1)
             DevicePositionSettings(settings: $settings)
             InspectorSwitch("Show center guides", isOn: $showCenterGuides)
@@ -881,7 +928,7 @@ private struct LayoutSettings: View {
             }.pickerStyle(.segmented)
             .help("Fit keeps the whole screenshot. Fill crops to cover the screen.")
             .disabled(hasFrame && settings.desktop.enabled)
-            Text(hasFrame && settings.desktop.enabled ? "Desktop backdrop keeps the window’s proportions. Use Window size in Device Frame to resize it."
+            Text(hasFrame && settings.desktop.enabled ? "Desktop backdrop keeps the window’s proportions. Use Window size above to resize it."
                  : settings.fillScreen ? "Fill covers the screen, cropping the screenshot if needed."
                  : "Fit shows the whole screenshot. Different proportions leave black bars inside the device.")
                 .font(.caption).foregroundStyle(.secondary)

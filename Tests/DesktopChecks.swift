@@ -23,6 +23,12 @@ struct DesktopChecks {
         settings.desktop.enabled = true
         settings.desktop.shadow = false
         settings.desktop.windowScale = 0.5
+        let emptyDesktop = NSBitmapImageRep(cgImage: try CompositionRenderer.render(
+            screenshot: nil, mockup: frame, opening: opening, settings: settings))
+        precondition(emptyDesktop.colorAt(x: 200, y: 150)!.blueComponent > 0.5,
+                     "Enabled desktop must appear before a screenshot is added")
+        precondition(emptyDesktop.colorAt(x: 5, y: 5)!.redComponent < 0.3,
+                     "Desktop without a screenshot must stay inside the bezel")
         func render() throws -> NSBitmapImageRep {
             NSBitmapImageRep(cgImage: try CompositionRenderer.render(screenshot: window, mockup: frame,
                 opening: opening, settings: settings))

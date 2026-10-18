@@ -41,7 +41,9 @@ p:last-child { margin-bottom: 0; }
   background: var(--paper);
   box-shadow: var(--shadow);
 }
-.hero { padding: 48px; background: linear-gradient(135deg, rgba(255, 250, 242, 0.96), rgba(255, 255, 255, 0.74)); }
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) 220px; align-items: center; gap: 36px; padding: 48px; background: linear-gradient(135deg, rgba(255, 250, 242, 0.96), rgba(255, 255, 255, 0.74)); }
+.hero-copy { min-width: 0; }
+.hero-icon { display: block; width: 100%; height: auto; }
 .eyebrow { color: var(--accent); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 16px; }
 .lede { font-size: clamp(1.35rem, 3vw, 1.8rem); color: var(--ink); line-height: 1.4; margin-bottom: 14px; }
 .summary { max-width: 740px; font-size: 1.05rem; }
@@ -79,6 +81,8 @@ p:last-child { margin-bottom: 0; }
 @media (max-width: 780px) {
   .page { width: calc(100% - 24px); padding: 24px 0; }
   .hero, .panel, .feature-band { padding: 24px; border-radius: 20px; }
+  .hero { grid-template-columns: 1fr; gap: 24px; }
+  .hero-icon { width: 128px; justify-self: center; }
   .screenshots, .feature-list, .steps, .split { grid-template-columns: 1fr; }
   .screenshots { gap: 16px; }
   .shot img { max-height: 420px; object-fit: contain; }
