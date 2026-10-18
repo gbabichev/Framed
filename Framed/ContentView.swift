@@ -151,7 +151,7 @@ private struct ScreenshotSidebar: View {
     @State private var isDropTargeted = false
 
     var body: some View {
-        List(selection: $model.sidebarSelection) {
+        List(selection: $model.sidebarSelections) {
             ForEach(model.sidebarGroups) { group in
                 DeviceSidebarSection(model: model, group: group)
             }
@@ -192,6 +192,7 @@ private struct DeviceSidebarSection: View {
     @State private var expanded = true
     @State private var confirmApply = false
     @State private var confirmRemove = false
+    @State private var isDropTargeted = false
 
     var body: some View {
         Section(isExpanded: $expanded) {
@@ -199,20 +200,16 @@ private struct DeviceSidebarSection: View {
                 .font(.callout)
                 .tag(SidebarSelection.device(group.id))
                 .help("Edit the default layout for new screenshots in this device section")
+                .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
+                    acceptDrop(providers)
+                }
             ForEach(group.screenshots) { shot in
                 DeviceScreenshotRow(model: model, shot: shot, sectionID: group.id)
                     .tag(SidebarSelection.screenshot(shot.id))
             }
             .onMove { model.reorderScreenshots(in: group.id, from: $0, to: $1) }
             .onInsert(of: [.fileURL, .plainText]) { destination, providers in
-                if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
-                    model.importDroppedScreenshots(providers, sectionID: group.id)
-                } else if let provider = providers.first {
-                    _ = provider.loadObject(ofClass: NSString.self) { value, _ in
-                        guard let value = value as? String, let id = UUID(uuidString: value) else { return }
-                        Task { @MainActor in model.insertScreenshot(id, in: group.id, at: destination) }
-                    }
-                }
+                _ = acceptDrop(providers, at: destination)
             }
             if group.screenshots.isEmpty {
                 Button("Add screenshots…", systemImage: "photo.badge.plus") {
@@ -221,6 +218,9 @@ private struct DeviceSidebarSection: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
+                    acceptDrop(providers)
+                }
             }
         } header: {
             HStack {
@@ -251,7 +251,12 @@ private struct DeviceSidebarSection: View {
                 Divider()
                 Button("Remove Device…", role: .destructive) { confirmRemove = true }
             }
-            .onDrop(of: [.fileURL], isTargeted: nil) { model.importDroppedScreenshots($0, sectionID: group.id) }
+            .contentShape(Rectangle())
+            .background(isDropTargeted ? Color.accentColor.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .onDrop(of: [.fileURL, .plainText], isTargeted: $isDropTargeted) { providers in
+                acceptDrop(providers)
+            }
         }
         .confirmationDialog("Apply this device’s default layout?", isPresented: $confirmApply) {
             Button("Apply Layout") { model.applyDeviceLayout(group.id) }
@@ -262,6 +267,12 @@ private struct DeviceSidebarSection: View {
             Button("Remove Device", role: .destructive) { model.removeDeviceSection(group.id) }
         } message: { Text("This can be undone.") }
     }
+    private func acceptDrop(_ providers: [NSItemProvider], at destination: Int? = nil) -> Bool {
+        let accepted = model.handleSidebarDrop(providers, sectionID: group.id, at: destination)
+        if accepted { expanded = true }
+        return accepted
+    }
+
 }
 
 private struct DeviceScreenshotRow: View {
@@ -275,7 +286,12 @@ private struct DeviceScreenshotRow: View {
         ScreenshotRow(name: shot.name, image: shot.image, frame: frame,
                       opening: model.screenOpening(for: layout.mockupID), settings: layout.settings,
                       remove: { model.removeScreenshot(shot.id) })
-            .onDrag { NSItemProvider(object: shot.id.uuidString as NSString) }
+            .onDrag { model.screenshotDragProvider(for: shot.id) }
+            .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
+                let group = model.sidebarGroups.first { $0.id == sectionID }
+                let index = group?.screenshots.firstIndex { $0.id == shot.id }
+                return model.handleSidebarDrop(providers, sectionID: sectionID, at: index)
+            }
             .contextMenu {
                 Button("Duplicate") { model.duplicateScreenshot(shot.id) }
                 Button("Move Up") { model.moveScreenshot(shot.id, by: -1) }
@@ -283,8 +299,8 @@ private struct DeviceScreenshotRow: View {
                 Menu("Move to Device") {
                     ForEach(model.deviceSections) { section in
                         Button(section.device.title, systemImage: section.device.symbol) {
-                            model.moveScreenshot(shot.id, toSection: section.id)
-                        }.disabled(section.id == sectionID)
+                            model.moveScreenshots(Set(model.screenshotIDsToMove(startingAt: shot.id)), toSection: section.id)
+                        }
                     }
                 }
                 Divider()

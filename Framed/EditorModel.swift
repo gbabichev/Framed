@@ -6,7 +6,18 @@ import UniformTypeIdentifiers
 final class EditorModel {
     var screenshots: [ImportedImage] = []
     var mockups: [ImportedImage] = []
-    var selectedScreenshotID: UUID? { didSet { if oldValue != selectedScreenshotID { lastCoalescingKey = nil } } }
+    var selectedScreenshotID: UUID? {
+        didSet {
+            if oldValue != selectedScreenshotID {
+                lastCoalescingKey = nil
+                if !isUpdatingSidebarSelection {
+                    selectedSidebarItems = selectedScreenshotID.map { [.screenshot($0)] } ?? []
+                }
+            }
+        }
+    }
+    private var selectedSidebarItems: Set<SidebarSelection> = []
+    @ObservationIgnored private var isUpdatingSidebarSelection = false
     private var layouts: [UUID: ScreenshotLayout] = [:]
     private(set) var deviceSections: [DeviceSection] = []
     private var memberships: [UUID: UUID] = [:]
@@ -55,15 +66,55 @@ final class EditorModel {
         return deviceSections.firstIndex { $0.id == id }
     }
     var activeSection: DeviceSection? { activeSectionIndex.map { deviceSections[$0] } }
+    var sidebarSelections: Set<SidebarSelection> {
+        get { selectedSidebarItems }
+        set {
+            let validShots = Set(newValue.compactMap { item -> UUID? in
+                if case .screenshot(let id) = item, screenshots.contains(where: { $0.id == id }) { return id }
+                return nil
+            })
+            if validShots.isEmpty {
+                if let device = newValue.first(where: { if case .device = $0 { return true }; return false }),
+                   case .device(let id) = device { selectDeviceSection(id) }
+                else { selectedSidebarItems = []; selectedScreenshotID = nil }
+                return
+            }
+            let previous = selectedSidebarItems
+            let added = validShots.filter { !previous.contains(.screenshot($0)) }
+            let ordered = sidebarOrderedScreenshots.map(\.id)
+            let newlySelected = ordered.filter { added.contains($0) }
+            let oldIndex = selectedScreenshotID.flatMap { ordered.firstIndex(of: $0) } ?? 0
+            let firstNewIndex = newlySelected.first.flatMap { ordered.firstIndex(of: $0) } ?? oldIndex
+            let lead = (firstNewIndex < oldIndex ? newlySelected.first : newlySelected.last)
+                ?? selectedScreenshotID.flatMap { validShots.contains($0) ? $0 : nil }
+                ?? ordered.first { validShots.contains($0) }
+            isUpdatingSidebarSelection = true
+            selectedScreenshotID = lead
+            selectedDeviceSectionID = lead.flatMap { memberships[$0] }
+            selectedSidebarItems = Set(validShots.map(SidebarSelection.screenshot))
+            isUpdatingSidebarSelection = false
+        }
+    }
     var sidebarSelection: SidebarSelection? {
         get { selectedScreenshotID.map(SidebarSelection.screenshot) ?? selectedDeviceSectionID.map(SidebarSelection.device) }
-        set {
-            switch newValue {
-            case .screenshot(let id): selectedScreenshotID = id; selectedDeviceSectionID = memberships[id]
-            case .device(let id): selectDeviceSection(id)
-            case nil: break
-            }
-        }
+        set { sidebarSelections = newValue.map { [$0] } ?? [] }
+    }
+    private var sidebarOrderedScreenshots: [ImportedImage] {
+        deviceSections.isEmpty ? screenshots : sidebarGroups.flatMap(\.screenshots)
+    }
+    func screenshotIDsToMove(startingAt id: UUID) -> [UUID] {
+        let selected = selectedSidebarItems.contains(.screenshot(id))
+            ? Set(selectedSidebarItems.compactMap { item -> UUID? in
+                if case .screenshot(let id) = item { return id }; return nil
+            }) : [id]
+        return sidebarOrderedScreenshots.filter { selected.contains($0.id) }.map(\.id)
+    }
+    func screenshotDragProvider(for id: UUID) -> NSItemProvider {
+        let ids = screenshotIDsToMove(startingAt: id)
+        if !selectedSidebarItems.contains(.screenshot(id)) { sidebarSelections = [.screenshot(id)] }
+        let data = try? JSONEncoder().encode(ids)
+        let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? id.uuidString
+        return NSItemProvider(object: text as NSString)
     }
     var sidebarGroups: [DeviceSidebarGroup] {
         let grouped = Dictionary(grouping: screenshots) { memberships[$0.id] }
@@ -72,6 +123,7 @@ final class EditorModel {
     func selectDeviceSection(_ id: UUID) {
         guard deviceSections.contains(where: { $0.id == id }) else { return }
         selectedDeviceSectionID = id; selectedScreenshotID = nil; lastCoalescingKey = nil
+        selectedSidebarItems = [.device(id)]
     }
     func addDeviceSection(_ device: ProjectDevice) {
         if let existing = deviceSections.first(where: { $0.device == device }) { selectDeviceSection(existing.id); return }
@@ -114,12 +166,21 @@ final class EditorModel {
     func removeDeviceSection(_ id: UUID) {
         beginEditing("Remove Device")
         defer { endEditing() }
+        let selectionBeforeRemoval = selectedSidebarItems
         let removed = Set(screenshots.filter { memberships[$0.id] == id }.map(\.id))
         screenshots.removeAll { removed.contains($0.id) }
         for id in removed { memberships.removeValue(forKey: id); layouts.removeValue(forKey: id) }
         deviceSections.removeAll { $0.id == id }
         if selectedScreenshotID.map(removed.contains) == true { selectedScreenshotID = nil }
         if selectedDeviceSectionID == id { selectedDeviceSectionID = deviceSections.first?.id }
+        let remaining = selectionBeforeRemoval.filter { item in
+            switch item {
+            case .screenshot(let id): return screenshots.contains { $0.id == id }
+            case .device(let id): return deviceSections.contains { $0.id == id }
+            }
+        }
+        if !remaining.isEmpty { sidebarSelections = remaining }
+        else if let id = selectedDeviceSectionID { selectDeviceSection(id) }
     }
     func screenOpening(for frameID: UUID?) -> ScreenOpening? {
         frameID.flatMap { openings[$0] }
@@ -277,6 +338,7 @@ final class EditorModel {
         let deviceSections: [DeviceSection]
         let memberships: [UUID: UUID]
         let selectedDeviceSectionID: UUID?
+        let sidebarItems: Set<SidebarSelection>
         let fingerprint: ProjectFingerprint
     }
     @ObservationIgnored private let history = UndoManager()
@@ -303,7 +365,7 @@ final class EditorModel {
                      emptySettings: emptySettings, emptyMockupID: emptyMockupID,
                      selectedScreenshotID: selectedScreenshotID, jpeg: jpeg,
                      openings: openings, libraryIDs: libraryIDs, deviceSections: deviceSections, memberships: memberships,
-                     selectedDeviceSectionID: selectedDeviceSectionID, fingerprint: fingerprint)
+                     selectedDeviceSectionID: selectedDeviceSectionID, sidebarItems: selectedSidebarItems, fingerprint: fingerprint)
     }
 
     func beginEditing(_ name: String = "Edit Layout") {
@@ -350,7 +412,8 @@ final class EditorModel {
         deviceSections = snapshot.deviceSections; memberships = snapshot.memberships
         selectedDeviceSectionID = snapshot.selectedDeviceSectionID
         emptySettings = snapshot.emptySettings; emptyMockupID = snapshot.emptyMockupID
-        selectedScreenshotID = snapshot.selectedScreenshotID; jpeg = snapshot.jpeg; openings = snapshot.openings
+        selectedScreenshotID = snapshot.selectedScreenshotID; selectedSidebarItems = snapshot.sidebarItems
+        jpeg = snapshot.jpeg; openings = snapshot.openings
         // Keep any library association learned after the edit (library operations aren't undoable).
         let associations = snapshot.libraryIDs.merging(libraryIDs) { _, latest in latest }
         libraryIDs = associations.filter { id, _ in mockups.contains { $0.id == id } }
@@ -425,6 +488,8 @@ final class EditorModel {
         selectedDeviceSectionID = project.selectedDeviceSectionID
         emptySettings = project.settings; emptyMockupID = project.selectedMockupID
         selectedScreenshotID = project.selectedScreenshotID
+        selectedSidebarItems = selectedScreenshotID.map { [.screenshot($0)] }
+            ?? selectedDeviceSectionID.map { [.device($0)] } ?? []
         jpeg = project.jpeg
         // Match the embedded PNG bytes directly, avoiding a full-resolution PNG re-encode.
         // A removed global library frame is never recreated by opening a project.
@@ -619,6 +684,35 @@ final class EditorModel {
     }
 
     @discardableResult
+    func handleSidebarDrop(_ providers: [NSItemProvider], sectionID: UUID, at destination: Int? = nil) -> Bool {
+        guard !isBusy, !isPresentingProjectDialog,
+              deviceSections.contains(where: { $0.id == sectionID }) else { return false }
+        if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
+            return importDroppedScreenshots(providers, sectionID: sectionID)
+        }
+        let items = providers.filter { $0.canLoadObject(ofClass: NSString.self) }
+        guard !items.isEmpty else { return false }
+        Task { @MainActor in
+            var ids: Set<UUID> = []
+            for provider in items {
+                let text: String? = await withCheckedContinuation { continuation in
+                    _ = provider.loadObject(ofClass: NSString.self) { item, _ in
+                        continuation.resume(returning: item as? String)
+                    }
+                }
+                guard let text else { continue }
+                if let id = UUID(uuidString: text) { ids.insert(id) }
+                else if let data = text.data(using: .utf8), let batch = try? JSONDecoder().decode([UUID].self, from: data) {
+                    ids.formUnion(batch)
+                }
+            }
+            guard !self.isBusy, !self.isPresentingProjectDialog else { return }
+            self.moveScreenshots(ids, toSection: sectionID, at: destination)
+        }
+        return true
+    }
+
+    @discardableResult
     func importDroppedScreenshots(_ providers: [NSItemProvider], sectionID: UUID? = nil) -> Bool {
         guard !isBusy, !isPresentingProjectDialog, !frameLibrary.isImporting, !frameLibrary.isRemoving else { return false }
         let files = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
@@ -735,9 +829,12 @@ final class EditorModel {
         memberships.removeValue(forKey: id)
         screenshots.removeAll { $0.id == id }
         layouts[id] = nil
-        if selectedScreenshotID == id {
+        let remainingSelection = selectedSidebarItems.subtracting([.screenshot(id)])
+        if !remainingSelection.isEmpty { sidebarSelections = remainingSelection }
+        else if selectedScreenshotID == id {
             selectedScreenshotID = screenshots.first { memberships[$0.id] == sectionID }?.id
             selectedDeviceSectionID = sectionID
+            if selectedScreenshotID == nil, let sectionID { selectedSidebarItems = [.device(sectionID)] }
         }
     }
 
@@ -763,19 +860,30 @@ final class EditorModel {
     }
 
     func insertScreenshot(_ id: UUID, in sectionID: UUID, at destination: Int) {
-        guard screenshots.contains(where: { $0.id == id }), deviceSections.contains(where: { $0.id == sectionID }) else { return }
-        beginEditing("Move Screenshot")
+        moveScreenshots([id], toSection: sectionID, at: destination)
+    }
+
+    func moveScreenshots(_ ids: Set<UUID>, toSection sectionID: UUID, at destination: Int? = nil) {
+        guard deviceSections.contains(where: { $0.id == sectionID }) else { return }
+        let moving = sidebarOrderedScreenshots.filter { ids.contains($0.id) }
+        guard !moving.isEmpty else { return }
+        let movingIDs = Set(moving.map(\.id))
+        let originalTarget = screenshots.filter { memberships[$0.id] == sectionID }
+        let requested = min(max(0, destination ?? originalTarget.count), originalTarget.count)
+        let index = requested - originalTarget.prefix(requested).filter { movingIDs.contains($0.id) }.count
+        let remainingTarget = originalTarget.filter { !movingIDs.contains($0.id) }
+        beginEditing("Move Screenshots")
         defer { endEditing() }
-        let oldGroup = screenshots.filter { memberships[$0.id] == sectionID }
-        if let source = oldGroup.firstIndex(where: { $0.id == id }) {
-            reorderScreenshots(in: sectionID, from: IndexSet(integer: source), to: min(destination, oldGroup.count))
-        } else {
-            memberships[id] = sectionID
-            let shot = screenshots.remove(at: screenshots.firstIndex { $0.id == id }!)
-            let target = min(destination, oldGroup.count)
-            let index = target < oldGroup.count ? screenshots.firstIndex { $0.id == oldGroup[target].id }! : screenshots.count
-            screenshots.insert(shot, at: index)
-        }
+        screenshots.removeAll { movingIDs.contains($0.id) }
+        let globalIndex: Int
+        if index < remainingTarget.count {
+            globalIndex = screenshots.firstIndex { $0.id == remainingTarget[index].id }!
+        } else if let last = remainingTarget.last {
+            globalIndex = screenshots.firstIndex { $0.id == last.id }! + 1
+        } else { globalIndex = screenshots.count }
+        screenshots.insert(contentsOf: moving, at: globalIndex)
+        for id in movingIDs { memberships[id] = sectionID }
+        sidebarSelections = Set(movingIDs.map(SidebarSelection.screenshot))
     }
 
     func moveScreenshot(_ id: UUID, by distance: Int) {

@@ -251,3 +251,7 @@ Device sections, membership, and defaults participate in the project fingerprint
 Export offers Selected Screenshot, Current Device, and Entire Project. Project exports create named device folders; device exports use the chosen folder directly. Both keep existing files and choose available filenames. Batch preview shows the first screenshot in the chosen scope.
 
 `Tests/DeviceSectionChecks.swift` covers default inheritance, isolation, explicit apply with preserved text, section movement/reordering, export lists, clean browsing, version 3 roundtrips, migration, reference validation, and grouped removal undo. Compile it with the same source list as the undo checks above.
+
+## Sidebar multi-selection
+
+The native List uses a Set selection binding for Shift-click ranges and Command-click toggling. Default Layout remains a single template selection; screenshot selections are temporary and do not enter the project fingerprint. The preview edits the lead screenshot. Dragging any selected screenshot includes the selected screenshots in visible sidebar order; dragging an unselected row starts a single-row selection. Drop handlers accept grouped JSON UUID payloads and native multi-provider UUID drags. Batch moves preserve layouts and register one undo action, including selection restoration. The Move to Device context menu also acts on the selected screenshots. `Tests/MultiSelectionChecks.swift` verifies these model and item-provider behaviors.
