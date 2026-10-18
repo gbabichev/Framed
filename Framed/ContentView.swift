@@ -1113,25 +1113,51 @@ private struct EffectsSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            InspectorSwitch("Corner glow", isOn: $effects.cornerGlow)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Corner glow").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    InspectorInfo(text: "Add a soft glow from a corner of the canvas. Strength controls its opacity; size controls how far it spreads.")
+                }
+                HStack {
+                    Toggle("Corner glow", isOn: $effects.cornerGlow)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.regular)
+                    Spacer()
+                    if effects.cornerGlow {
+                        ColorPicker("Glow color", selection: $effects.pickerColor, supportsOpacity: false)
+                            .labelsHidden()
+                            .help("Glow color")
+                    }
+                }
+            }
             if effects.cornerGlow {
-                ColorPicker("Glow color", selection: $effects.pickerColor, supportsOpacity: false)
-                Picker("Corner", selection: $effects.glowCorner) {
-                    ForEach(GlowCorner.allCases) { Text($0.title).tag($0) }
+                HStack {
+                    Text("Corner").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Picker("Corner", selection: $effects.glowCorner) {
+                        ForEach(GlowCorner.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
                 }
                 ValueSlider(title: "Glow strength", value: $effects.glowStrength, range: 0...1)
                 ValueSlider(title: "Glow size", value: $effects.glowSpread, range: 0.2...1.5)
             }
-            InspectorSwitch("Device fade", isOn: $effects.deviceFade)
+            Divider()
+            InspectorSwitch("Device fade", isOn: $effects.deviceFade,
+                            info: "Fades the screenshot and frame together into the background, or into transparency for transparent PNGs. Depth controls how far the fade reaches; strength controls its intensity.")
             if effects.deviceFade {
-                Picker("Fade edge", selection: $effects.fadeEdge) {
-                    ForEach(DeviceFadeEdge.allCases) { Text($0.title).tag($0) }
+                HStack {
+                    Text("Fade edge").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Picker("Fade edge", selection: $effects.fadeEdge) {
+                        ForEach(DeviceFadeEdge.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
                 }
                 ValueSlider(title: "Fade depth", value: $effects.fadeDepth, range: 0.1...0.8)
                 ValueSlider(title: "Fade strength", value: $effects.fadeStrength, range: 0...1)
-                Text("Fades the screenshot and frame together into the background, or into transparency for transparent PNGs.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
