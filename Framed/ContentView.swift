@@ -992,23 +992,35 @@ private struct ScreenCalibrationSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            InspectorSwitch("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled,
-                            info: model.opening != nil
-                                ? "Screen detected. Automatic detection is recommended. Enable manual adjustment to change the screen opening."
-                                : "Automatic detection is recommended. If the screen opening wasn’t detected, enable manual adjustment to set its size.")
-            if model.settings.manualScreen {
-                if model.opening != nil {
-                    Button("Reset to Detected Screen") { model.resetScreenCalibration() }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Adjust screen edges manually").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    InspectorInfo(text: (model.opening != nil ? "Screen detected. " : "")
+                        + "Automatic detection is recommended and preserves camera cutouts. Manual adjustment changes the blue outline’s width and height, moving opposite edges together around its current center. Corner rounding controls the manual screen’s rounded corners.")
                 }
-                Text("Adjust the blue outline’s width and height. Opposite edges move together, keeping the screen centered in its current position.")
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Toggle("Adjust screen edges manually", isOn: $model.manualCalibrationEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.regular)
+                    Spacer()
+                    if model.settings.manualScreen && model.opening != nil {
+                        Button("Reset to Detected Screen", systemImage: "arrow.counterclockwise") {
+                            model.resetScreenCalibration()
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("Reset to the automatically detected screen")
+                    }
+                }
+            }
+            if model.settings.manualScreen {
                 ValueSlider(title: "Width", value: screenSize(horizontal: true),
                             range: 0.1...maximumScreenSize(horizontal: true))
                 ValueSlider(title: "Height", value: screenSize(horizontal: false),
                             range: 0.1...maximumScreenSize(horizontal: false))
                 ValueSlider(title: "Corner rounding", value: $model.settings.cornerRadius, range: 0...0.25)
-                Text("Manual calibration uses rounded corners. Automatic detection also preserves camera cutouts.")
-                    .foregroundStyle(.secondary)
             }
         }.font(.caption)
     }
