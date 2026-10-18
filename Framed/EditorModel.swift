@@ -528,6 +528,32 @@ final class EditorModel {
         }
     }
 
+    @discardableResult
+    func importDroppedScreenshots(_ providers: [NSItemProvider]) -> Bool {
+        guard !isBusy, !isPresentingProjectDialog, !frameLibrary.isImporting, !frameLibrary.isRemoving else { return false }
+        let files = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !files.isEmpty else { return false }
+        Task { @MainActor in
+            var urls: [URL] = []
+            for provider in files {
+                let url: URL? = await withCheckedContinuation { continuation in
+                    _ = provider.loadObject(ofClass: NSURL.self) { item, _ in
+                        let url = item as? URL
+                        continuation.resume(returning: url?.isFileURL == true ? url : nil)
+                    }
+                }
+                if let url { urls.append(url) }
+            }
+            guard !isBusy, !isPresentingProjectDialog else { return }
+            guard !urls.isEmpty else {
+                error = "Couldn’t read the dropped files. Try adding them with Import screenshots."
+                return
+            }
+            load(urls, asMockups: false)
+        }
+        return true
+    }
+
     func load(_ urls: [URL], asMockups: Bool) {
         if !asMockups { beginEditing("Import Screenshots") }
         defer { if !asMockups { endEditing() } }

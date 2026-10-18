@@ -141,6 +141,7 @@ private struct ProjectOpenProgress: View {
 private struct ScreenshotSidebar: View {
     @Bindable var model: EditorModel
     @State private var applyStyleSource: UUID?
+    @State private var isDropTargeted = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if model.screenshots.isEmpty {
@@ -149,7 +150,7 @@ private struct ScreenshotSidebar: View {
                         .font(.title).foregroundStyle(.tertiary)
                     Text("No screenshots")
                         .font(.callout).foregroundStyle(.secondary)
-                    Text("Add images from your device or simulator.")
+                    Text("Drop screenshots here, or add images from your device or simulator.")
                         .font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -185,7 +186,11 @@ private struct ScreenshotSidebar: View {
                             }
                     }
                     .onMove(perform: model.moveScreenshots)
-                    .onInsert(of: [.plainText]) { destination, providers in
+                    .onInsert(of: [.fileURL, .plainText]) { destination, providers in
+                        if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
+                            model.importDroppedScreenshots(providers)
+                            return
+                        }
                         guard let provider = providers.first else { return }
                         _ = provider.loadObject(ofClass: NSString.self) { value, _ in
                             guard let value = value as? String, let id = UUID(uuidString: value) else { return }
@@ -199,6 +204,18 @@ private struct ScreenshotSidebar: View {
                 .listStyle(.inset)
                 .scrollContentBackground(.hidden)
                 .background(Color.clear)
+            }
+        }
+        .contentShape(Rectangle())
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            model.importDroppedScreenshots(providers)
+        }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(4)
+                    .allowsHitTesting(false)
             }
         }
         .confirmationDialog("Apply this style to all screenshots?", isPresented: Binding(get: { applyStyleSource != nil }, set: { if !$0 { applyStyleSource = nil } })) {
