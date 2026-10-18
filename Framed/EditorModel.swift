@@ -8,6 +8,9 @@ final class EditorModel {
     var mockups: [ImportedImage] = []
     var selectedScreenshotID: UUID? { didSet { if oldValue != selectedScreenshotID { lastCoalescingKey = nil } } }
     private var layouts: [UUID: ScreenshotLayout] = [:]
+    private(set) var deviceSections: [DeviceSection] = []
+    private var memberships: [UUID: UUID] = [:]
+    var selectedDeviceSectionID: UUID?
     private var emptySettings = CompositionSettings()
     private var emptyMockupID: UUID?
     private struct CopiedStyle {
@@ -17,29 +20,106 @@ final class EditorModel {
         let libraryID: UUID?
     }
     private var copiedStyle: CopiedStyle?
-    private var effectiveScreenshotID: UUID? { selectedScreenshotID ?? screenshots.first?.id }
+    private var effectiveScreenshotID: UUID? { selectedScreenshotID ?? (selectedDeviceSectionID == nil ? screenshots.first?.id : nil) }
     var settings: CompositionSettings {
-        get { effectiveScreenshotID.map { layout(for: $0).settings } ?? emptySettings }
+        get { effectiveScreenshotID.map { layout(for: $0).settings } ?? activeSection.flatMap { try? $0.settings.restored() } ?? emptySettings }
         set {
             guard ProjectSettings(settings) != ProjectSettings(newValue) else { return }
             recordEdit("Edit Layout", coalescing: settingsCoalescingKey(from: settings, to: newValue))
             if let id = effectiveScreenshotID {
                 var layout = layout(for: id); layout.settings = newValue; layouts[id] = layout
-            } else { emptySettings = newValue }
+            } else if let index = activeSectionIndex { deviceSections[index].settings = ProjectSettings(newValue) }
+            else { emptySettings = newValue }
         }
     }
     var selectedMockupID: UUID? {
-        get { effectiveScreenshotID.map { layout(for: $0).mockupID } ?? emptyMockupID }
+        get {
+            if let id = effectiveScreenshotID { return layout(for: id).mockupID }
+            if let section = activeSection { return section.mockupID }
+            return emptyMockupID
+        }
         set {
             guard selectedMockupID != newValue else { return }
             recordEdit("Change Frame")
             if let id = effectiveScreenshotID {
                 var layout = layout(for: id); layout.mockupID = newValue; layouts[id] = layout
-            } else { emptyMockupID = newValue }
+            } else if let index = activeSectionIndex { deviceSections[index].mockupID = newValue }
+            else { emptyMockupID = newValue }
         }
     }
     func layout(for id: UUID) -> ScreenshotLayout {
         layouts[id] ?? ScreenshotLayout(settings: emptySettings, mockupID: emptyMockupID)
+    }
+    private var activeSectionIndex: Int? {
+        let id = selectedScreenshotID.flatMap { memberships[$0] } ?? selectedDeviceSectionID
+        return deviceSections.firstIndex { $0.id == id }
+    }
+    var activeSection: DeviceSection? { activeSectionIndex.map { deviceSections[$0] } }
+    var sidebarSelection: SidebarSelection? {
+        get { selectedScreenshotID.map(SidebarSelection.screenshot) ?? selectedDeviceSectionID.map(SidebarSelection.device) }
+        set {
+            switch newValue {
+            case .screenshot(let id): selectedScreenshotID = id; selectedDeviceSectionID = memberships[id]
+            case .device(let id): selectDeviceSection(id)
+            case nil: break
+            }
+        }
+    }
+    var sidebarGroups: [DeviceSidebarGroup] {
+        let grouped = Dictionary(grouping: screenshots) { memberships[$0.id] }
+        return deviceSections.map { DeviceSidebarGroup(section: $0, screenshots: grouped[$0.id] ?? []) }
+    }
+    func selectDeviceSection(_ id: UUID) {
+        guard deviceSections.contains(where: { $0.id == id }) else { return }
+        selectedDeviceSectionID = id; selectedScreenshotID = nil; lastCoalescingKey = nil
+    }
+    func addDeviceSection(_ device: ProjectDevice) {
+        if let existing = deviceSections.first(where: { $0.device == device }) { selectDeviceSection(existing.id); return }
+        beginEditing("Add Device")
+        defer { endEditing() }
+        let section = DeviceSection(device: device, settings: ProjectSettings(device.defaultSettings))
+        deviceSections.append(section); selectDeviceSection(section.id)
+    }
+    func useScreenshotAsDefault(_ id: UUID) {
+        guard let sectionID = memberships[id], let index = deviceSections.firstIndex(where: { $0.id == sectionID }) else { return }
+        beginEditing("Set Device Default Layout")
+        defer { endEditing() }
+        let layout = layout(for: id)
+        deviceSections[index].settings = ProjectSettings(layout.settings)
+        deviceSections[index].mockupID = layout.mockupID
+    }
+    func applyDeviceLayout(_ id: UUID) {
+        guard let section = deviceSections.first(where: { $0.id == id }), let settings = try? section.settings.restored() else { return }
+        beginEditing("Apply Device Layout")
+        defer { endEditing() }
+        let style = ScreenshotLayout(settings: settings, mockupID: section.mockupID)
+        for shot in screenshots where memberships[shot.id] == id { applyStyle(style, to: shot.id) }
+    }
+    func moveScreenshot(_ id: UUID, toSection sectionID: UUID) {
+        guard deviceSections.contains(where: { $0.id == sectionID }), screenshots.contains(where: { $0.id == id }) else { return }
+        recordEdit("Move Screenshot to Device")
+        memberships[id] = sectionID
+    }
+    func reorderScreenshots(in sectionID: UUID, from offsets: IndexSet, to destination: Int) {
+        let group = screenshots.filter { memberships[$0.id] == sectionID }
+        var reordered = group
+        let moving = offsets.sorted().map { group[$0] }
+        let insertion = destination - offsets.filter { $0 < destination }.count
+        for index in offsets.sorted(by: >) { reordered.remove(at: index) }
+        reordered.insert(contentsOf: moving, at: insertion)
+        recordEdit("Reorder Screenshots")
+        var iterator = reordered.makeIterator()
+        screenshots = screenshots.map { memberships[$0.id] == sectionID ? iterator.next()! : $0 }
+    }
+    func removeDeviceSection(_ id: UUID) {
+        beginEditing("Remove Device")
+        defer { endEditing() }
+        let removed = Set(screenshots.filter { memberships[$0.id] == id }.map(\.id))
+        screenshots.removeAll { removed.contains($0.id) }
+        for id in removed { memberships.removeValue(forKey: id); layouts.removeValue(forKey: id) }
+        deviceSections.removeAll { $0.id == id }
+        if selectedScreenshotID.map(removed.contains) == true { selectedScreenshotID = nil }
+        if selectedDeviceSectionID == id { selectedDeviceSectionID = deviceSections.first?.id }
     }
     func screenOpening(for frameID: UUID?) -> ScreenOpening? {
         frameID.flatMap { openings[$0] }
@@ -47,7 +127,7 @@ final class EditorModel {
     private var projectLayouts: [ProjectScreenshotLayout] {
         screenshots.map { shot in
             let layout = layout(for: shot.id)
-            return ProjectScreenshotLayout(screenshotID: shot.id, mockupID: layout.mockupID, settings: ProjectSettings(layout.settings))
+            return ProjectScreenshotLayout(screenshotID: shot.id, sectionID: memberships[shot.id], mockupID: layout.mockupID, settings: ProjectSettings(layout.settings))
         }
     }
     var jpeg = false { willSet { if newValue != jpeg { recordEdit("Change Export Format") } } }
@@ -194,6 +274,9 @@ final class EditorModel {
         let jpeg: Bool
         let openings: [UUID: ScreenOpening]
         let libraryIDs: [UUID: UUID]
+        let deviceSections: [DeviceSection]
+        let memberships: [UUID: UUID]
+        let selectedDeviceSectionID: UUID?
         let fingerprint: ProjectFingerprint
     }
     @ObservationIgnored private let history = UndoManager()
@@ -219,7 +302,8 @@ final class EditorModel {
         EditSnapshot(screenshots: screenshots, mockups: mockups, layouts: layouts,
                      emptySettings: emptySettings, emptyMockupID: emptyMockupID,
                      selectedScreenshotID: selectedScreenshotID, jpeg: jpeg,
-                     openings: openings, libraryIDs: libraryIDs, fingerprint: fingerprint)
+                     openings: openings, libraryIDs: libraryIDs, deviceSections: deviceSections, memberships: memberships,
+                     selectedDeviceSectionID: selectedDeviceSectionID, fingerprint: fingerprint)
     }
 
     func beginEditing(_ name: String = "Edit Layout") {
@@ -263,6 +347,8 @@ final class EditorModel {
         isRestoringHistory = true
         defer { isRestoringHistory = false }
         screenshots = snapshot.screenshots; mockups = snapshot.mockups; layouts = snapshot.layouts
+        deviceSections = snapshot.deviceSections; memberships = snapshot.memberships
+        selectedDeviceSectionID = snapshot.selectedDeviceSectionID
         emptySettings = snapshot.emptySettings; emptyMockupID = snapshot.emptyMockupID
         selectedScreenshotID = snapshot.selectedScreenshotID; jpeg = snapshot.jpeg; openings = snapshot.openings
         // Keep any library association learned after the edit (library operations aren't undoable).
@@ -311,14 +397,16 @@ final class EditorModel {
     var fingerprint: ProjectFingerprint {
         ProjectFingerprint(screenshots: screenshots.map(\.id), mockups: mockups.map(\.id),
                            layouts: projectLayouts, emptySettings: screenshots.isEmpty ? ProjectSettings(emptySettings) : nil,
-                           emptyMockupID: screenshots.isEmpty ? emptyMockupID : nil, jpeg: jpeg)
+                           emptyMockupID: screenshots.isEmpty ? emptyMockupID : nil, jpeg: jpeg,
+                           deviceSections: deviceSections, memberships: memberships)
     }
     var isDirty: Bool { fingerprint != savedFingerprint }
 
     func makeProject() throws -> FramedProject {
-        try FramedProject(screenshots: screenshots.map { try ProjectImage($0) }, mockups: mockups.map { try ProjectImage($0) },
+        try FramedProject(version: deviceSections.isEmpty ? 2 : 3, screenshots: screenshots.map { try ProjectImage($0) }, mockups: mockups.map { try ProjectImage($0) },
                           selectedScreenshotID: selectedScreenshotID, selectedMockupID: selectedMockupID,
-                          settings: ProjectSettings(settings), jpeg: jpeg, layouts: projectLayouts)
+                          settings: ProjectSettings(settings), jpeg: jpeg, layouts: projectLayouts, deviceSections: deviceSections.isEmpty ? nil : deviceSections,
+                          selectedDeviceSectionID: selectedScreenshotID == nil ? selectedDeviceSectionID : nil)
     }
 
     /// Synchronous in-memory restore for checks. User-facing opens use requestOpenProject's background worker.
@@ -333,6 +421,8 @@ final class EditorModel {
         defer { isRestoringHistory = false; historyRevision += 1 }
         screenshots = project.screenshots; mockups = project.mockups; openings = project.openings
         layouts = project.layouts; copiedStyle = nil
+        deviceSections = project.deviceSections; memberships = project.memberships
+        selectedDeviceSectionID = project.selectedDeviceSectionID
         emptySettings = project.settings; emptyMockupID = project.selectedMockupID
         selectedScreenshotID = project.selectedScreenshotID
         jpeg = project.jpeg
@@ -529,10 +619,11 @@ final class EditorModel {
     }
 
     @discardableResult
-    func importDroppedScreenshots(_ providers: [NSItemProvider]) -> Bool {
+    func importDroppedScreenshots(_ providers: [NSItemProvider], sectionID: UUID? = nil) -> Bool {
         guard !isBusy, !isPresentingProjectDialog, !frameLibrary.isImporting, !frameLibrary.isRemoving else { return false }
         let files = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
         guard !files.isEmpty else { return false }
+        let destination = sectionID ?? activeSection?.id
         Task { @MainActor in
             var urls: [URL] = []
             for provider in files {
@@ -549,14 +640,16 @@ final class EditorModel {
                 error = "Couldn’t read the dropped files. Try adding them with Import screenshots."
                 return
             }
-            load(urls, asMockups: false)
+            load(urls, asMockups: false, sectionID: destination)
         }
         return true
     }
 
-    func load(_ urls: [URL], asMockups: Bool) {
+    func load(_ urls: [URL], asMockups: Bool, sectionID: UUID? = nil) {
         if !asMockups { beginEditing("Import Screenshots") }
         defer { if !asMockups { endEditing() } }
+        var destination = sectionID ?? activeSection?.id
+        let matchInitialCanvas = destination == nil
         var failures: [String] = []
         for url in urls {
             do {
@@ -564,15 +657,29 @@ final class EditorModel {
                 if asMockups {
                     try frameLibrary.store(imported)
                 } else {
-                    let inherited = ScreenshotLayout(settings: settings, mockupID: selectedMockupID)
+                    if destination == nil {
+                        let matching = ScreenshotPreset.all.first { ($0.width == imported.image.width && $0.height == imported.image.height)
+                            || ($0.width == imported.image.height && $0.height == imported.image.width) }
+                        let device = ProjectDevice.detect(selectedMockup == nil ? (matching?.name ?? settings.preset.name) : settings.preset.name)
+                        let section = DeviceSection(device: device, settings: ProjectSettings(settings), mockupID: selectedMockupID)
+                        deviceSections.append(section); destination = section.id
+                    }
+                    guard let section = deviceSections.first(where: { $0.id == destination }) else {
+                        throw FramedError.message("The destination device section no longer exists.")
+                    }
+                    let inherited = ScreenshotLayout(settings: try section.settings.restored(), mockupID: section.mockupID)
+                    memberships[imported.id] = section.id
                     screenshots.append(imported)
                     layouts[imported.id] = inherited
                     selectedScreenshotID = imported.id
-                    if screenshots.count == 1 && selectedMockupID == nil {
+                    if matchInitialCanvas && screenshots.count == 1 && selectedMockupID == nil {
                         let w = imported.image.width, h = imported.image.height
                         if let preset = ScreenshotPreset.all.first(where: { ($0.width == w && $0.height == h) || ($0.width == h && $0.height == w) }) {
                             settings.preset = preset
                             settings.landscape = w > h && preset.width < preset.height
+                            if let index = deviceSections.firstIndex(where: { $0.id == destination }) {
+                                deviceSections[index].settings = ProjectSettings(settings)
+                            }
                         }
                     }
                 }
@@ -624,9 +731,14 @@ final class EditorModel {
     func removeScreenshot(_ id: UUID) {
         beginEditing("Remove Screenshot")
         defer { endEditing() }
+        let sectionID = memberships[id]
+        memberships.removeValue(forKey: id)
         screenshots.removeAll { $0.id == id }
         layouts[id] = nil
-        if selectedScreenshotID == id { selectedScreenshotID = screenshots.first?.id }
+        if selectedScreenshotID == id {
+            selectedScreenshotID = screenshots.first { memberships[$0.id] == sectionID }?.id
+            selectedDeviceSectionID = sectionID
+        }
     }
 
     func duplicateScreenshot(_ id: UUID) {
@@ -636,6 +748,7 @@ final class EditorModel {
         let source = screenshots[index]
         let duplicate = ImportedImage(id: UUID(), name: source.name + " copy", image: source.image)
         layouts[duplicate.id] = layout(for: id)
+        memberships[duplicate.id] = memberships[id]
         screenshots.insert(duplicate, at: index + 1)
         selectedScreenshotID = duplicate.id
     }
@@ -649,10 +762,31 @@ final class EditorModel {
         screenshots.insert(contentsOf: moving, at: insertion)
     }
 
+    func insertScreenshot(_ id: UUID, in sectionID: UUID, at destination: Int) {
+        guard screenshots.contains(where: { $0.id == id }), deviceSections.contains(where: { $0.id == sectionID }) else { return }
+        beginEditing("Move Screenshot")
+        defer { endEditing() }
+        let oldGroup = screenshots.filter { memberships[$0.id] == sectionID }
+        if let source = oldGroup.firstIndex(where: { $0.id == id }) {
+            reorderScreenshots(in: sectionID, from: IndexSet(integer: source), to: min(destination, oldGroup.count))
+        } else {
+            memberships[id] = sectionID
+            let shot = screenshots.remove(at: screenshots.firstIndex { $0.id == id }!)
+            let target = min(destination, oldGroup.count)
+            let index = target < oldGroup.count ? screenshots.firstIndex { $0.id == oldGroup[target].id }! : screenshots.count
+            screenshots.insert(shot, at: index)
+        }
+    }
+
     func moveScreenshot(_ id: UUID, by distance: Int) {
-        guard let index = screenshots.firstIndex(where: { $0.id == id }),
-              screenshots.indices.contains(index + distance) else { return }
-        moveScreenshots(from: IndexSet(integer: index), to: distance > 0 ? index + distance + 1 : index + distance)
+        if let sectionID = memberships[id] {
+            let group = screenshots.filter { memberships[$0.id] == sectionID }
+            guard let index = group.firstIndex(where: { $0.id == id }), group.indices.contains(index + distance) else { return }
+            reorderScreenshots(in: sectionID, from: IndexSet(integer: index), to: distance > 0 ? index + distance + 1 : index + distance)
+        } else {
+            guard let index = screenshots.firstIndex(where: { $0.id == id }), screenshots.indices.contains(index + distance) else { return }
+            moveScreenshots(from: IndexSet(integer: index), to: distance > 0 ? index + distance + 1 : index + distance)
+        }
     }
 
     var canPasteStyle: Bool { copiedStyle != nil }
@@ -687,12 +821,21 @@ final class EditorModel {
         layouts[id] = result
     }
 
-    var canExportAll: Bool {
-        !screenshots.isEmpty && !isBusy && !isChoosingExportLocation && screenshots.allSatisfy { shot in
+    func screenshotsForExport(_ scope: ScreenshotExportScope) -> [ImportedImage] {
+        switch scope {
+        case .selected: selectedScreenshot.map { [$0] } ?? []
+        case .device: screenshots.filter { memberships[$0.id] == activeSection?.id }
+        case .project: deviceSections.isEmpty ? screenshots : sidebarGroups.flatMap(\.screenshots)
+        }
+    }
+    func canExport(_ scope: ScreenshotExportScope) -> Bool {
+        let shots = screenshotsForExport(scope)
+        return !shots.isEmpty && !isBusy && !isChoosingExportLocation && shots.allSatisfy { shot in
             let layout = layout(for: shot.id)
             return layout.mockupID == nil || openings[layout.mockupID!] != nil || layout.settings.manualScreen
         }
     }
+    var canExportAll: Bool { canExport(.project) }
 
     @discardableResult
     func exportSelected(options: ExportOptions = ExportOptions(), onStart: @escaping () -> Void = {}) -> Bool {
@@ -718,18 +861,21 @@ final class EditorModel {
     }
 
     @discardableResult
-    func exportAll(options: ExportOptions = ExportOptions(), onStart: @escaping () -> Void = {}) -> Bool {
-        guard canExportAll else { return false }
+    func exportAll(options: ExportOptions = ExportOptions(), scope: ScreenshotExportScope = .project, onStart: @escaping () -> Void = {}) -> Bool {
+        guard canExport(scope) else { return false }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false; panel.canCreateDirectories = true
         panel.prompt = "Export Here"
-        panel.message = "Screenshots will be saved directly in this folder. Existing files will be kept."
+        panel.message = scope == .project ? "Screenshots will be organized into device folders. Existing files will be kept."
+            : "Screenshots for this device will be saved directly in this folder. Existing files will be kept."
         return presentExportDestination(panel) { [self] response in
             guard response == .OK, let directory = panel.url else { return }
             onStart()
             let access = directory.startAccessingSecurityScopedResource()
-            let jobs = screenshots.map { shot in (shot, layout(for: shot.id)) }
+            let jobs = screenshotsForExport(scope).map { shot in
+                (shot, layout(for: shot.id), scope == .project ? deviceSections.first { $0.id == memberships[shot.id] }?.device.title : nil)
+            }
             let frames = mockups, masks = openings, useJPEG = jpeg
             isBusy = true
             status = "Exporting \(jobs.count) screenshots…"
@@ -738,10 +884,12 @@ final class EditorModel {
                 defer { isBusy = false; if access { directory.stopAccessingSecurityScopedResource() } }
                 do {
                     for (index, job) in jobs.enumerated() {
-                        let (shot, layout) = job
+                        let (shot, layout, folder) = job
+                        let outputDirectory = folder.map { directory.appendingPathComponent($0, isDirectory: true) } ?? directory
+                        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
                         let mockup = frames.first { $0.id == layout.mockupID }?.image
                         let mask = layout.mockupID.flatMap { masks[$0] }
-                        let url = ExportWorker.availableURL(in: directory,
+                        let url = ExportWorker.availableURL(in: outputDirectory,
                             name: String(format: "%02d-", index + 1) + shot.name, extension: useJPEG ? "jpg" : "png")
                         try await ExportWorker.write(screenshot: shot, mockup: mockup, opening: mask,
                             settings: layout.settings, jpeg: useJPEG, options: options, url: url, overwrite: false)

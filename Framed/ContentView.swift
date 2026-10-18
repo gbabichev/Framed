@@ -15,6 +15,14 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            ForEach(ProjectDevice.allCases) { device in
+                                Button(device.title, systemImage: device.symbol) { model.addDeviceSection(device) }
+                            }
+                        } label: { Label("Add Device", systemImage: "plus") }
+                        .help("Add a device section")
+                    }
+                    ToolbarItem(placement: .primaryAction) {
                         Button { model.importImages(mockups: false) } label: {
                             Label("Add screenshots", systemImage: "photo.badge.plus")
                         }
@@ -140,93 +148,152 @@ private struct ProjectOpenProgress: View {
 
 private struct ScreenshotSidebar: View {
     @Bindable var model: EditorModel
-    @State private var applyStyleSource: UUID?
     @State private var isDropTargeted = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if model.screenshots.isEmpty {
+        List(selection: $model.sidebarSelection) {
+            ForEach(model.sidebarGroups) { group in
+                DeviceSidebarSection(model: model, group: group)
+            }
+        }
+        .listStyle(.sidebar)
+        .overlay {
+            if model.deviceSections.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.title).foregroundStyle(.tertiary)
-                    Text("No screenshots")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Text("Drop screenshots here, or add images from your device or simulator.")
+                    Text("Add a device or screenshots").font(.callout)
+                    Text("Drop screenshots here, or add a device to set up its default layout.")
                         .font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Menu("Add Device", systemImage: "plus") {
+                        ForEach(ProjectDevice.allCases) { device in
+                            Button(device.title, systemImage: device.symbol) { model.addDeviceSection(device) }
+                        }
+                    }
                     Button("Import screenshots…") { model.importImages(mockups: false) }
-                        .buttonStyle(.borderedProminent)
                 }
                 .padding(20)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(selection: $model.selectedScreenshotID) {
-                    ForEach(model.screenshots) { shot in
-                        let layout = model.layout(for: shot.id)
-                        let frame = model.mockups.first { $0.id == layout.mockupID }
-                        ScreenshotRow(name: shot.name, image: shot.image, frame: frame,
-                                      opening: model.screenOpening(for: layout.mockupID), settings: layout.settings,
-                                      remove: { model.removeScreenshot(shot.id) })
-                            .tag(shot.id)
-                            .listRowBackground(Color.clear)
-                            .onDrag { NSItemProvider(object: shot.id.uuidString as NSString) }
-                            .contextMenu {
-                                Button("Duplicate") { model.duplicateScreenshot(shot.id) }
-                                Button("Move Up") { model.moveScreenshot(shot.id, by: -1) }
-                                    .disabled(model.screenshots.first?.id == shot.id)
-                                Button("Move Down") { model.moveScreenshot(shot.id, by: 1) }
-                                    .disabled(model.screenshots.last?.id == shot.id)
-                                Divider()
-                                Button("Copy Style") { model.copyStyle(from: shot.id) }
-                                Button("Paste Style") { model.pasteStyle(to: shot.id) }.disabled(!model.canPasteStyle)
-                                Button("Apply Style to All…") { applyStyleSource = shot.id }
-                                    .disabled(model.screenshots.count < 2)
-                                Divider()
-                                Button("Remove", role: .destructive) { model.removeScreenshot(shot.id) }
-                            }
-                    }
-                    .onMove(perform: model.moveScreenshots)
-                    .onInsert(of: [.fileURL, .plainText]) { destination, providers in
-                        if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
-                            model.importDroppedScreenshots(providers)
-                            return
-                        }
-                        guard let provider = providers.first else { return }
-                        _ = provider.loadObject(ofClass: NSString.self) { value, _ in
-                            guard let value = value as? String, let id = UUID(uuidString: value) else { return }
-                            Task { @MainActor in
-                                guard let index = model.screenshots.firstIndex(where: { $0.id == id }) else { return }
-                                model.moveScreenshots(from: IndexSet(integer: index), to: min(destination, model.screenshots.count))
-                            }
-                        }
-                    }
-                }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
             }
         }
-        .contentShape(Rectangle())
-        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
-            model.importDroppedScreenshots(providers)
-        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { model.importDroppedScreenshots($0) }
         .overlay {
             if isDropTargeted {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.accentColor, lineWidth: 2)
-                    .padding(4)
-                    .allowsHitTesting(false)
+                RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(4).allowsHitTesting(false)
             }
         }
-        .confirmationDialog("Apply this style to all screenshots?", isPresented: Binding(get: { applyStyleSource != nil }, set: { if !$0 { applyStyleSource = nil } })) {
-            Button("Apply Style to All") {
-                if let id = applyStyleSource { model.applyStyleToAll(from: id) }
-                applyStyleSource = nil
+    }
+}
+
+private struct DeviceSidebarSection: View {
+    @Bindable var model: EditorModel
+    let group: DeviceSidebarGroup
+    @State private var expanded = true
+    @State private var confirmApply = false
+    @State private var confirmRemove = false
+
+    var body: some View {
+        Section(isExpanded: $expanded) {
+            Label("Default Layout", systemImage: "slider.horizontal.3")
+                .font(.callout)
+                .tag(SidebarSelection.device(group.id))
+                .help("Edit the default layout for new screenshots in this device section")
+            ForEach(group.screenshots) { shot in
+                DeviceScreenshotRow(model: model, shot: shot, sectionID: group.id)
+                    .tag(SidebarSelection.screenshot(shot.id))
             }
-            Button("Cancel", role: .cancel) { applyStyleSource = nil }
+            .onMove { model.reorderScreenshots(in: group.id, from: $0, to: $1) }
+            .onInsert(of: [.fileURL, .plainText]) { destination, providers in
+                if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
+                    model.importDroppedScreenshots(providers, sectionID: group.id)
+                } else if let provider = providers.first {
+                    _ = provider.loadObject(ofClass: NSString.self) { value, _ in
+                        guard let value = value as? String, let id = UUID(uuidString: value) else { return }
+                        Task { @MainActor in model.insertScreenshot(id, in: group.id, at: destination) }
+                    }
+                }
+            }
+            if group.screenshots.isEmpty {
+                Button("Add screenshots…", systemImage: "photo.badge.plus") {
+                    model.selectDeviceSection(group.id)
+                    model.importImages(mockups: false)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+        } header: {
+            HStack {
+                Button {
+                    model.selectDeviceSection(group.id)
+                } label: {
+                    Label(group.section.device.title, systemImage: group.section.device.symbol)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Text(group.screenshots.count, format: .number)
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+            }
+            .padding(.vertical, 5)
+            .contextMenu {
+                Button("Edit Default Layout") { model.selectDeviceSection(group.id) }
+                Button("Import Screenshots…") {
+                    model.selectDeviceSection(group.id); model.importImages(mockups: false)
+                }
+                Button("Apply Default Layout to Screenshots…") { confirmApply = true }
+                    .disabled(group.screenshots.isEmpty)
+                Divider()
+                Button("Remove Device…", role: .destructive) { confirmRemove = true }
+            }
+            .onDrop(of: [.fileURL], isTargeted: nil) { model.importDroppedScreenshots($0, sectionID: group.id) }
+        }
+        .confirmationDialog("Apply this device’s default layout?", isPresented: $confirmApply) {
+            Button("Apply Layout") { model.applyDeviceLayout(group.id) }
         } message: {
-            Text("Replaces each screenshot’s frame, canvas, appearance, headline styling, and effects. Each headline’s text is kept.")
+            Text("Updates frames, canvas, appearance, headline styling, and effects in this section. Each screenshot’s headline text is kept.")
         }
+        .confirmationDialog("Remove this device and its screenshots?", isPresented: $confirmRemove) {
+            Button("Remove Device", role: .destructive) { model.removeDeviceSection(group.id) }
+        } message: { Text("This can be undone.") }
+    }
+}
+
+private struct DeviceScreenshotRow: View {
+    let model: EditorModel
+    let shot: ImportedImage
+    let sectionID: UUID
+
+    var body: some View {
+        let layout = model.layout(for: shot.id)
+        let frame = model.mockups.first { $0.id == layout.mockupID }
+        ScreenshotRow(name: shot.name, image: shot.image, frame: frame,
+                      opening: model.screenOpening(for: layout.mockupID), settings: layout.settings,
+                      remove: { model.removeScreenshot(shot.id) })
+            .onDrag { NSItemProvider(object: shot.id.uuidString as NSString) }
+            .contextMenu {
+                Button("Duplicate") { model.duplicateScreenshot(shot.id) }
+                Button("Move Up") { model.moveScreenshot(shot.id, by: -1) }
+                Button("Move Down") { model.moveScreenshot(shot.id, by: 1) }
+                Menu("Move to Device") {
+                    ForEach(model.deviceSections) { section in
+                        Button(section.device.title, systemImage: section.device.symbol) {
+                            model.moveScreenshot(shot.id, toSection: section.id)
+                        }.disabled(section.id == sectionID)
+                    }
+                }
+                Divider()
+                Button("Use as Device Default Layout") { model.useScreenshotAsDefault(shot.id) }
+                Button("Copy Style") { model.copyStyle(from: shot.id) }
+                Button("Paste Style") { model.pasteStyle(to: shot.id) }.disabled(!model.canPasteStyle)
+                Divider()
+                Button("Remove", role: .destructive) { model.removeScreenshot(shot.id) }
+            }
     }
 }
 
@@ -310,7 +377,7 @@ private struct PreviewPane: View {
     var body: some View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
-                if model.selectedScreenshot != nil || model.selectedMockup != nil {
+                if model.selectedScreenshot != nil || model.selectedMockup != nil || model.activeSection != nil {
                     let size = zoom.size(canvas: model.settings.outputSize, viewport: geometry.size, displayScale: displayScale)
                     CanvasScroller(fit: zoom == .fit, panEnabled: panEnabled) {
                         CompositionPreview(screenshot: model.selectedScreenshot?.image, mockup: model.selectedMockup?.image,
@@ -328,7 +395,9 @@ private struct PreviewPane: View {
             }
             HStack {
                 if model.isBusy { ProgressView().controlSize(.small) }
-                Text(panEnabled ? "Drag to pan. Turn off the hand tool to edit the layout." : model.status)
+                Text(panEnabled ? "Drag to pan. Turn off the hand tool to edit the layout."
+                     : model.selectedScreenshotID == nil && model.activeSection != nil
+                        ? "Editing \(model.activeSection!.device.title) default layout · New screenshots inherit this layout." : model.status)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
 
@@ -776,6 +845,11 @@ private struct InspectorPane: View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 18) {
+                    if model.selectedScreenshot == nil, let section = model.activeSection {
+                        DeviceDefaultLayoutActions(model: model, section: section,
+                                                   screenshotCount: model.screenshotsForExport(.device).count)
+                            .id(section.id)
+                    }
                     InspectorCard("Device & Canvas", systemImage: "iphone") {
                         MockupSettings(model: model)
                         Divider()
@@ -805,6 +879,31 @@ private struct InspectorPane: View {
         }
         .controlSize(.small)
         .background(.background)
+    }
+}
+
+private struct DeviceDefaultLayoutActions: View {
+    let model: EditorModel
+    let section: DeviceSection
+    let screenshotCount: Int
+    @State private var confirmApply = false
+
+    var body: some View {
+        InspectorCard("Default Layout", systemImage: "slider.horizontal.3") {
+            HStack {
+                Text(section.device.title).font(.subheadline.weight(.semibold))
+                Spacer()
+                InspectorInfo(text: "Changes here become the default for new screenshots. Apply the layout to update existing screenshots in this device section, keeping their individual headline text.")
+            }
+            Button("Apply to Existing Screenshots…") { confirmApply = true }
+                .disabled(screenshotCount == 0)
+                .help("Apply this layout to \(screenshotCount) screenshots in \(section.device.title)")
+        }
+        .confirmationDialog("Apply layout to \(screenshotCount) screenshots?", isPresented: $confirmApply) {
+            Button("Apply Layout") { model.applyDeviceLayout(section.id) }
+        } message: {
+            Text("Updates the frame, canvas, appearance, headline styling, position, and effects for this device’s screenshots. Each screenshot’s headline text is kept. You can undo this change.")
+        }
     }
 }
 
@@ -1312,7 +1411,7 @@ private struct ValueSlider: View {
 private struct ExportDialog: View {
     @Bindable var model: EditorModel
     @Environment(\.dismiss) private var dismiss
-    @State private var exportAll = false
+    @State private var scope = ScreenshotExportScope.selected
     @State private var showsStatus = false
     @State private var exportOptions = ExportOptions()
 
@@ -1328,12 +1427,12 @@ private struct ExportDialog: View {
             }.padding(20)
             Divider()
             HStack(alignment: .top, spacing: 24) {
-                ExportPreview(model: model, options: exportOptions)
+                ExportPreview(model: model, options: exportOptions, scope: scope)
                     .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 VStack(alignment: .leading, spacing: 12) {
-                    ExportFormatSettings(model: model, options: $exportOptions, exportAll: exportAll)
-                    ExportSizeSettings(options: $exportOptions, exportAll: exportAll)
-                    ExportScreenshotSettings(model: model, exportAll: $exportAll)
+                    ExportFormatSettings(model: model, options: $exportOptions, exportAll: scope != .selected)
+                    ExportSizeSettings(options: $exportOptions, exportAll: scope != .selected)
+                    ExportScreenshotSettings(model: model, scope: $scope)
                 }
                 .disabled(model.isBusy || model.isChoosingExportLocation)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
@@ -1348,18 +1447,19 @@ private struct ExportDialog: View {
                 Button(showsStatus ? "Done" : "Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(model.isBusy || model.isChoosingExportLocation)
-                Button(exportAll ? "Export All…" : "Export…") {
-                    if exportAll {
-                        model.exportAll(options: exportOptions) { showsStatus = true }
+                Button("Export…") {
+                    if scope != .selected {
+                        model.exportAll(options: exportOptions, scope: scope) { showsStatus = true }
                     } else {
                         model.exportSelected(options: exportOptions) { showsStatus = true }
                     }
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(exportAll ? !model.canExportAll : !model.canExport)
+                .disabled(!model.canExport(scope))
             }.padding(16)
         }
+        .onAppear { if model.selectedScreenshot == nil { scope = .device } }
         .frame(width: 760, height: 620)
         .interactiveDismissDisabled(model.isBusy || model.isChoosingExportLocation)
         .alert("Export failed", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
@@ -1435,20 +1535,22 @@ private struct ExportSizeSettings: View {
 
 private struct ExportScreenshotSettings: View {
     let model: EditorModel
-    @Binding var exportAll: Bool
+    @Binding var scope: ScreenshotExportScope
 
     var body: some View {
         InspectorCard("Screenshots", systemImage: "photo.on.rectangle") {
-            Picker("Screenshots to export", selection: $exportAll) {
-                Text("Selected").tag(false)
-                Text("All (\(model.screenshots.count))").tag(true)
-            }.pickerStyle(.segmented).labelsHidden()
-            Text(exportAll ? "Saved in sidebar order to the folder you choose."
+            Picker("Screenshots to export", selection: $scope) {
+                Text("Selected Screenshot").tag(ScreenshotExportScope.selected)
+                    .disabled(model.selectedScreenshot == nil)
+                Text("Current Device (\(model.screenshotsForExport(.device).count))").tag(ScreenshotExportScope.device)
+                Text("Entire Project (\(model.screenshots.count))").tag(ScreenshotExportScope.project)
+            }
+            .labelsHidden()
+            Text(scope == .project ? "Organized into device folders in the folder you choose."
+                 : scope == .device ? "\(model.activeSection?.device.title ?? "Device") screenshots, in sidebar order."
                  : model.selectedScreenshot?.name ?? "No screenshot selected")
                 .font(.caption).foregroundStyle(.secondary)
-                .lineLimit(1).truncationMode(.middle)
-                .help(exportAll ? "Each screenshot uses its own frame, headline, canvas, and effects."
-                      : model.selectedScreenshot?.name ?? "No screenshot selected")
+                .lineLimit(2)
         }
     }
 }
@@ -1456,21 +1558,25 @@ private struct ExportScreenshotSettings: View {
 private struct ExportPreview: View {
     let model: EditorModel
     let options: ExportOptions
+    let scope: ScreenshotExportScope
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
+        let sourceSettings = model.screenshotsForExport(scope).first.map { model.layout(for: $0.id).settings } ?? model.settings
         VStack(spacing: 10) {
             GeometryReader { geometry in
-                let settings = options.settings(for: model.settings)
-                let pixels = options.pixelSize(for: model.settings)
+                let shot = model.screenshotsForExport(scope).first
+                let layout = shot.map { model.layout(for: $0.id) }
+                let settings = options.settings(for: sourceSettings)
+                let pixels = options.pixelSize(for: sourceSettings)
                 let resolution = min(max(pixels.width, pixels.height),
                     PreviewResolution.maxDimension(canvas: settings.outputSize, viewport: geometry.size, displayScale: displayScale))
-                if let shot = model.selectedScreenshot,
-                   let image = try? CompositionRenderer.render(screenshot: shot.image, mockup: model.selectedMockup?.image,
-                                                               opening: model.opening, settings: settings,
+                if let shot,
+                   let image = try? CompositionRenderer.render(screenshot: shot.image, mockup: model.mockups.first { $0.id == layout?.mockupID }?.image,
+                                                               opening: model.screenOpening(for: layout?.mockupID), settings: settings,
                                                                maxDimension: resolution, forceOpaque: model.jpeg) {
                     ZStack {
-                        if model.settings.transparentBackground && !model.jpeg { TransparencyGrid() }
+                        if sourceSettings.transparentBackground && !model.jpeg { TransparencyGrid() }
                         Image(decorative: image, scale: displayScale).resizable().interpolation(.high)
                     }
                     .aspectRatio(CGFloat(image.width) / CGFloat(image.height), contentMode: .fit)
@@ -1478,7 +1584,7 @@ private struct ExportPreview: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            Text("\(Int(options.pixelSize(for: model.settings).width)) × \(Int(options.pixelSize(for: model.settings).height)) px")
+            Text("\(Int(options.pixelSize(for: sourceSettings).width)) × \(Int(options.pixelSize(for: sourceSettings).height)) px")
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

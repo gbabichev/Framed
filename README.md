@@ -19,21 +19,22 @@ Framed turns screenshots from your device or simulator into finished images for 
 - **Bring your own frames.** Import front-facing, transparent PNG device frames. Framed detects the screen opening and preserves the bezel and camera cutouts.
 - **Import once, reuse later.** Keep frames in a reusable library with visual previews, search, one-click Watch, iPhone, iPad, and Mac filters, renaming, and bulk management.
 - **Match your canvas.** Selecting a frame chooses a canvas from the matching device family. You can change the size and orientation afterward.
+- **Organize by device.** Keep iPhone, iPad, Mac, Apple Watch, and Apple TV screenshots in collapsible sections, each with a default layout for new imports.
 - **Give every screenshot its own layout.** Choose a separate frame, background, headline, position, and effects for each image. Duplicate screenshots, reorder them, or copy a style across your set.
 - **Add a headline.** Use up to two lines of text with your choice of font, size, weight, color, and position.
 - **Style the scene.** Choose a background color or transparency, add a corner glow, and fade the device into the background.
 - **Make Mac windows feel at home.** Place a window capture on a gradient desktop inside a Mac frame, with adjustable window size, position, and shadow.
 - **Arrange with precision.** Move the device and headline on the canvas, use center guides and snapping, and zoom or pan to inspect the details.
-- **Export your way.** Save PNG or JPEG, adjust JPEG quality, choose a canvas size and scale, and export one image or the whole set directly into a folder you choose.
+- **Export your way.** Save PNG or JPEG, adjust JPEG quality, choose a canvas size and scale, and export one image, the current device, or the entire project into a folder you choose. Entire projects are organized into device folders.
 - **Pick up where you left off.** Save a portable `.framed` project containing your screenshots, frames, and layouts. Undo and redo edits, and get a save prompt before closing unsaved work.
 
 ## Getting started
 
-1. **Add screenshots** using the sidebar or the Add Screenshots toolbar button.
+1. **Add a device** with the sidebar toolbar’s **+** menu and set its **Default Layout**, or import screenshots to get started. You can also drag screenshots from Finder into the sidebar.
 2. **Choose a device frame** in Frame Library, or choose **No frame** to work with the screenshot alone. You can also choose a frame before importing a screenshot.
 3. **Make it yours.** Adjust the background and device position, add a headline, and try the optional effects. Your changes belong to the selected screenshot.
-4. **Check the canvas.** Framed selects a matching device-family preset when you choose a frame. Review the final size in **Export Canvas**.
-5. **Export.** Open Export in the toolbar, choose PNG or JPEG, set the size and quality, and select where to save. Choose **All** to export the full set in sidebar order.
+4. **Check the canvas.** Framed selects a matching device-family preset when you choose a frame. Review the final size in **Device & Canvas**.
+5. **Export.** Open Export in the toolbar, choose PNG or JPEG, set the size and quality, and select where to save. Choose **Current Device** or **Entire Project** to export a set in sidebar order.
 6. **Save your project** with **⌘S** to continue later. Exporting images and saving a project are separate actions.
 
 ## Getting device frames

@@ -69,8 +69,15 @@ struct PerScreenshotChecks {
         model.selectedScreenshotID = b.id
         precondition(model.settings.headline.firstLine == "Bravo", "Apply all overwrote headline text")
         let reopened = EditorModel(frameLibrary: library)
-        try reopened.restoreProject(FramedProject.read(from: path), at: path)
-        precondition(reopened.fingerprint == fingerprint && !reopened.isDirty)
+        let savedProject = try FramedProject.read(from: path)
+        try reopened.restoreProject(savedProject, at: path)
+        precondition(!reopened.isDirty && !reopened.deviceSections.isEmpty,
+                     "Legacy projects must open clean with inferred device sections")
+        for record in savedProject.layouts! {
+            let layout = reopened.layout(for: record.screenshotID)
+            precondition(ProjectSettings(layout.settings) == record.settings && layout.mockupID == record.mockupID,
+                         "Migration must preserve every saved screenshot layout")
+        }
         reopened.selectedScreenshotID = b.id
         precondition(reopened.settings.headline.firstLine == "Bravo" && reopened.selectedMockupID == frameID)
         reopened.selectedScreenshotID = c.id
@@ -85,7 +92,7 @@ struct PerScreenshotChecks {
             precondition(ProjectSettings(migrated.settings) == legacySettings && migrated.selectedMockupID == frameID)
         }
         let migratedProject = try migrated.makeProject()
-        precondition(!migrated.isDirty && migratedProject.version == 2)
+        precondition(!migrated.isDirty && migratedProject.version == 3)
         var invalid = try model.makeProject()
         invalid.layouts!.removeLast()
         let before = reopened.fingerprint

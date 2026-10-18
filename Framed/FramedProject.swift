@@ -108,6 +108,7 @@ nonisolated struct ProjectImage: Codable, Sendable {
 
 nonisolated struct ProjectScreenshotLayout: Codable, Equatable, Sendable {
     var screenshotID: UUID
+    var sectionID: UUID? = nil
     var mockupID: UUID?
     var settings: ProjectSettings
 }
@@ -126,12 +127,14 @@ nonisolated struct FramedProject: Codable, Sendable {
     var settings: ProjectSettings
     var jpeg: Bool
     var layouts: [ProjectScreenshotLayout]?
+    var deviceSections: [DeviceSection]? = nil
+    var selectedDeviceSectionID: UUID? = nil
 
     static func read(from url: URL) throws -> Self {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let project = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
-        guard (1...2).contains(project.version) else { throw FramedError.message("This project was created by a newer version of Framed.") }
+        guard (1...3).contains(project.version) else { throw FramedError.message("This project was created by a newer version of Framed.") }
         return project
     }
 
@@ -152,6 +155,8 @@ struct ProjectFingerprint: Equatable {
     var emptySettings: ProjectSettings?
     var emptyMockupID: UUID?
     var jpeg: Bool
+    var deviceSections: [DeviceSection] = []
+    var memberships: [UUID: UUID] = [:]
 }
 
 /// Fully prepared away from the UI; publishing it only replaces in-memory state.
@@ -165,6 +170,9 @@ nonisolated struct PreparedProject: Sendable {
     let selectedScreenshotID: UUID?
     let selectedMockupID: UUID?
     let jpeg: Bool
+    let deviceSections: [DeviceSection]
+    let memberships: [UUID: UUID]
+    let selectedDeviceSectionID: UUID?
 }
 
 nonisolated enum ProjectFileWorker {
@@ -180,7 +188,7 @@ nonisolated enum ProjectFileWorker {
 
     static func prepare(_ project: FramedProject) throws -> PreparedProject {
         try Task.checkCancellation()
-        guard (1...2).contains(project.version) else { throw FramedError.message("Unsupported project version.") }
+        guard (1...3).contains(project.version) else { throw FramedError.message("Unsupported project version.") }
         // Decode and validate everything before replacing the current canvas.
         let restoredSettings = try project.settings.restored()
         let shots = try project.screenshots.map { try Task.checkCancellation(); return try $0.restored() }
@@ -192,7 +200,7 @@ nonisolated enum ProjectFileWorker {
             throw FramedError.message("This project contains invalid image references.")
         }
         var restoredLayouts: [UUID: ScreenshotLayout] = [:]
-        if project.version == 2 {
+        if project.version >= 2 {
             guard let records = project.layouts, records.count == shots.count,
                   Set(records.map(\.screenshotID)) == Set(shots.map(\.id)) else {
                 throw FramedError.message("This project contains missing or duplicate screenshot layouts.")
@@ -208,6 +216,44 @@ nonisolated enum ProjectFileWorker {
                 restoredLayouts[shot.id] = ScreenshotLayout(settings: restoredSettings, mockupID: project.selectedMockupID)
             }
         }
+        if project.version >= 3 {
+            guard let sections = project.deviceSections, let records = project.layouts,
+                  records.allSatisfy({ $0.sectionID != nil }), !sections.isEmpty else {
+                throw FramedError.message("This project contains missing device sections.")
+            }
+        }
+        var sections = project.deviceSections ?? []
+        var memberships: [UUID: UUID] = [:]
+        guard Set(sections.map(\.id)).count == sections.count,
+              Set(sections.map(\.device)).count == sections.count else {
+            throw FramedError.message("This project contains duplicate device sections.")
+        }
+        for section in sections {
+            _ = try section.settings.restored()
+            guard section.mockupID == nil || frames.contains(where: { $0.id == section.mockupID }) else {
+                throw FramedError.message("A device layout refers to a missing frame.")
+            }
+        }
+        for shot in shots {
+            let layout = restoredLayouts[shot.id]!
+            if let sectionID = project.layouts?.first(where: { $0.screenshotID == shot.id })?.sectionID {
+                guard sections.contains(where: { $0.id == sectionID }) else {
+                    throw FramedError.message("A screenshot refers to a missing device section.")
+                }
+                memberships[shot.id] = sectionID
+            } else {
+                let device = ProjectDevice.detect(layout.settings.preset.name)
+                if let section = sections.first(where: { $0.device == device }) {
+                    memberships[shot.id] = section.id
+                } else {
+                    let section = DeviceSection(device: device, settings: ProjectSettings(layout.settings), mockupID: layout.mockupID)
+                    sections.append(section); memberships[shot.id] = section.id
+                }
+            }
+        }
+        if let selected = project.selectedDeviceSectionID, !sections.contains(where: { $0.id == selected }) {
+            throw FramedError.message("The selected device section is missing.")
+        }
         var detected: [UUID: ScreenOpening] = [:]
         var digests: [UUID: String] = [:]
         for (index, frame) in frames.enumerated() {
@@ -218,7 +264,8 @@ nonisolated enum ProjectFileWorker {
         try Task.checkCancellation()
         return PreparedProject(screenshots: shots, mockups: frames, openings: detected, frameDigests: digests,
                                layouts: restoredLayouts, settings: restoredSettings,
-                               selectedScreenshotID: project.selectedScreenshotID ?? shots.first?.id,
-                               selectedMockupID: project.selectedMockupID, jpeg: project.jpeg)
+                               selectedScreenshotID: project.selectedDeviceSectionID != nil ? project.selectedScreenshotID : project.selectedScreenshotID ?? shots.first?.id,
+                               selectedMockupID: project.selectedMockupID, jpeg: project.jpeg,
+                               deviceSections: sections, memberships: memberships, selectedDeviceSectionID: project.selectedDeviceSectionID)
     }
 }
