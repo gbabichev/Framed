@@ -20,6 +20,7 @@ nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
     var headline: HeadlineSettings?
     var desktop: DesktopSettings?
     var fillScreen: Bool
+    var windowMode: Bool?
     var manualScreen: Bool
     var screenX: Double
     var screenY: Double
@@ -35,6 +36,7 @@ nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
         effects = settings.effects
         headline = settings.headline
         desktop = settings.desktop
+        windowMode = settings.windowMode
         let color = settings.background.usingColorSpace(.sRGB) ?? .white
         red = max(0, min(1, color.redComponent))
         green = max(0, min(1, color.greenComponent))
@@ -62,6 +64,7 @@ nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
         settings.effects = effects ?? CompositionEffects()
         settings.headline = headline ?? HeadlineSettings()
         settings.desktop = desktop ?? DesktopSettings()
+        settings.windowMode = windowMode ?? (desktop?.enabled == true)
         settings.fillScreen = fillScreen; settings.manualScreen = manualScreen
         settings.screenX = screenX; settings.screenY = screenY
         settings.screenWidth = screenWidth; settings.screenHeight = screenHeight

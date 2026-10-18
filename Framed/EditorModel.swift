@@ -59,6 +59,8 @@ final class EditorModel {
     let frameLibrary: FrameLibrary
     private var libraryIDs: [UUID: UUID] = [:]
     var isShowingFrameLibrary = false
+    // Editing tool state; excluded from project settings and undo history.
+    var isMovingDesktopWindow = false
     var isPresentingFrameImport = false
     @ObservationIgnored private var frameImportTask: Task<Void, Never>?
     private(set) var projectURL: URL?
@@ -496,14 +498,14 @@ final class EditorModel {
             target = CGSize(width: device.width * bounds.width, height: device.height * bounds.height)
             let screenAspect = target.width / target.height
             let shotAspect = Double(shot.image.width) / Double(shot.image.height)
-            if !settings.desktop.enabled && abs(screenAspect / shotAspect - 1) > 0.025 {
+            if !settings.windowMode && !settings.desktop.enabled && abs(screenAspect / shotAspect - 1) > 0.025 {
                 messages.append(settings.fillScreen ? "Aspect ratios differ. Fill crops the screenshot; check the preview." : "Aspect ratios differ. Fit keeps all content with black bars inside the screen.")
             }
         } else {
             target.width *= settings.deviceScale; target.height *= settings.deviceScale
         }
         let sx = target.width / Double(shot.image.width), sy = target.height / Double(shot.image.height)
-        let imageScale = selectedMockup != nil && settings.desktop.enabled
+        let imageScale = selectedMockup != nil && settings.windowMode
             ? min(sx, sy) * settings.desktop.windowScale
             : (settings.fillScreen ? max(sx, sy) : min(sx, sy))
         if imageScale > 1.05 {

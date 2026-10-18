@@ -432,6 +432,7 @@ private struct CenterGuides: View {
 }
 
 private struct CompositionPreview: View {
+    @Environment(EditorModel.self) private var editor
     @Environment(\.displayScale) private var displayScale
     @AppStorage(EditorPreferences.centerGuides) private var showCenterGuides = false
     let screenshot: CGImage?
@@ -448,8 +449,28 @@ private struct CompositionPreview: View {
                 ZStack {
                     if settings.transparentBackground && !forceOpaque { TransparencyGrid() }
                     Image(decorative: image, scale: displayScale).resizable().interpolation(.high)
-                    if showCenterGuides { CenterGuides() }
-                    DeviceDragOverlay(screenshot: screenshot, mockup: mockup, settings: $settings)
+                    if showCenterGuides && !(editor.isMovingDesktopWindow && settings.windowMode) {
+                        CenterGuides()
+                    }
+                    if showCenterGuides && settings.windowMode && editor.isMovingDesktopWindow {
+                        GeometryReader { guideGeometry in
+                            if let screen = CompositionRenderer.screenRect(mockup: mockup, opening: opening,
+                                canvas: guideGeometry.size, settings: settings) {
+                                CenterGuides()
+                                    .frame(width: screen.width, height: screen.height)
+                                    .position(x: screen.midX, y: guideGeometry.size.height - screen.midY)
+                            }
+                        }
+                        .allowsHitTesting(false)
+                        .clipped()
+                    }
+                    if editor.isMovingDesktopWindow && settings.windowMode,
+                       let screenshot {
+                        DesktopWindowDragOverlay(screenshot: screenshot, mockup: mockup,
+                                                 opening: opening, settings: $settings)
+                    } else {
+                        DeviceDragOverlay(screenshot: screenshot, mockup: mockup, settings: $settings)
+                    }
                     if settings.manualScreen, let mockup {
                         ScreenCalibrationOutline(mockup: mockup, settings: settings)
                     }
@@ -464,6 +485,65 @@ private struct CompositionPreview: View {
             } else {
                 ContentUnavailableView("Set the screen area", systemImage: "viewfinder", description: Text("This mockup needs manual screen bounds. Enable Manual screen area in the inspector."))
             }
+        }
+    }
+}
+
+private struct DesktopWindowDragOverlay: View {
+    @Environment(EditorModel.self) private var editor
+    @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
+    let screenshot: CGImage
+    let mockup: CGImage?
+    let opening: ScreenOpening?
+    @Binding var settings: CompositionSettings
+    @State private var dragOrigin: CGPoint?
+
+    var body: some View {
+        GeometryReader { geometry in
+            if let screen = CompositionRenderer.screenRect(mockup: mockup, opening: opening,
+                                                           canvas: geometry.size, settings: settings) {
+                let window = CompositionRenderer.desktopWindowRect(screenshot: screenshot, screen: screen,
+                                                                    settings: settings.desktop)
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(.blue.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .contentShape(Rectangle())
+                    .frame(width: window.width, height: window.height)
+                    .position(x: window.midX, y: geometry.size.height - window.midY)
+                    .gesture(DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            if dragOrigin == nil {
+                                editor.beginEditing("Move Window")
+                                dragOrigin = CGPoint(x: settings.desktop.windowX, y: settings.desktop.windowY)
+                            }
+                            guard let origin = dragOrigin else { return }
+                            let travelX = screen.width - window.width
+                            let travelY = screen.height - window.height
+                            var desktop = settings.desktop
+                            if travelX > 0.5 {
+                                desktop.windowX = min(1, max(0, origin.x + value.translation.width / travelX))
+                            }
+                            if travelY > 0.5 {
+                                desktop.windowY = min(1, max(0, origin.y + value.translation.height / travelY))
+                            }
+                            let snapped = CenterSnapping.position(
+                                CGPoint(x: desktop.windowX, y: desktop.windowY),
+                                canvas: CGSize(width: travelX, height: travelY), enabled: snapToCenter)
+                            desktop.windowX = snapped.x; desktop.windowY = snapped.y
+                            settings.desktop = desktop
+                        }
+                        .onEnded { _ in finishDrag() })
+                    .help("Drag to move the window inside the device screen")
+                    .accessibilityLabel("Move desktop window")
+            }
+        }
+        .clipped()
+        .onDisappear { finishDrag() }
+    }
+
+    private func finishDrag() {
+        if dragOrigin != nil {
+            dragOrigin = nil
+            editor.endEditing()
         }
     }
 }
@@ -502,7 +582,7 @@ private struct DeviceDragOverlay: View {
                     }
                     .onEnded { _ in dragOrigin = nil; editor.endEditing() })
                 .help("Drag to move the device and screenshot together")
-                .accessibilityLabel("Device position; use the position controls in Appearance for precise placement")
+                .accessibilityLabel("Drag to move the device; reset to center is available in Appearance")
         }
         .clipped()
         .onDisappear { if dragOrigin != nil { dragOrigin = nil; editor.endEditing() } }
@@ -646,7 +726,7 @@ private struct InspectorSwitch: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(title)
+                Text(title).font(.subheadline.weight(.semibold))
                 if let info {
                     Spacer(minLength: 4)
                     InspectorInfo(text: info)
@@ -828,22 +908,80 @@ private struct DesktopBackdropSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            InspectorSwitch("Desktop backdrop", isOn: $desktop.enabled)
-            Text("Place a window screenshot on a gradient desktop inside the frame. Works best with transparent window captures.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if desktop.enabled {
-                ColorPicker("Wallpaper start", selection: Binding(
-                    get: { Color(nsColor: desktop.topColor) },
-                    set: { desktop.topColor = NSColor($0) }), supportsOpacity: false)
-                ColorPicker("Wallpaper end", selection: Binding(
-                    get: { Color(nsColor: desktop.bottomColor) },
-                    set: { desktop.bottomColor = NSColor($0) }), supportsOpacity: false)
-                ValueSlider(title: "Window size", value: $desktop.windowScale, range: 0.2...1)
-                ValueSlider(title: "Window horizontal position", value: $desktop.windowX, range: 0...1)
-                ValueSlider(title: "Window vertical position", value: $desktop.windowY, range: 0...1)
-                InspectorSwitch("Window shadow", isOn: $desktop.shadow)
-                Button("Center Window") { desktop.windowX = 0.5; desktop.windowY = 0.5 }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Desktop backdrop").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    InspectorInfo(text: "Place a window screenshot on a gradient desktop inside the frame. Works best with transparent window captures.")
+                }
+                HStack {
+                    Toggle("Desktop backdrop", isOn: $desktop.enabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.regular)
+                    Spacer()
+                    if desktop.enabled {
+                        ColorPicker("Wallpaper start", selection: Binding(
+                            get: { Color(nsColor: desktop.topColor) },
+                            set: { desktop.topColor = NSColor($0) }), supportsOpacity: false)
+                            .labelsHidden().help("Wallpaper start color")
+                        ColorPicker("Wallpaper end", selection: Binding(
+                            get: { Color(nsColor: desktop.bottomColor) },
+                            set: { desktop.bottomColor = NSColor($0) }), supportsOpacity: false)
+                            .labelsHidden().help("Wallpaper end color")
+                    }
+                }
+            }
+
+        }
+    }
+}
+
+private struct ScreenshotPlacementSettings: View {
+    @Environment(EditorModel.self) private var editor
+    @Binding var settings: CompositionSettings
+
+    var body: some View {
+        @Bindable var editor = editor
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Screenshot placement").font(.subheadline.weight(.semibold))
+                Spacer()
+                InspectorInfo(text: "Fit shows the whole screenshot. Fill crops to cover the screen. Window lets you resize and move the screenshot independently of the desktop backdrop.")
+            }
+            Picker("Screenshot placement", selection: $settings.screenshotPlacement) {
+                ForEach(ScreenshotPlacement.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            if settings.windowMode {
+                ValueSlider(title: "Window size", value: $settings.desktop.windowScale, range: 0.2...1)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Move Screenshot").font(.subheadline.weight(.semibold))
+                        Spacer()
+                        InspectorInfo(text: "Drag the screenshot inside the device screen. Turn off to move the full device. Turn off the hand tool before editing.")
+                    }
+                    HStack {
+                        Toggle("Move Screenshot", isOn: $editor.isMovingDesktopWindow)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.regular)
+                        Spacer()
+                        Button("Center Screenshot", systemImage: "arrow.counterclockwise") {
+                            editor.beginEditing("Center Screenshot")
+                            defer { editor.endEditing() }
+                            settings.desktop.windowX = 0.5; settings.desktop.windowY = 0.5
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("Reset screenshot position to center")
+                    }
+                }
+                .disabled(editor.selectedScreenshot == nil)
+                InspectorSwitch("Window shadow", isOn: $settings.desktop.shadow)
             }
         }
     }
@@ -910,50 +1048,55 @@ private struct LayoutSettings: View {
     @Binding var settings: CompositionSettings
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            InspectorSwitch("Transparent background", isOn: $settings.transparentBackground)
-            ColorPicker(settings.transparentBackground ? "JPEG background" : "Background", selection: Binding(get: { Color(nsColor: settings.background) }, set: { settings.background = NSColor($0) }), supportsOpacity: false)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transparent background").font(.subheadline.weight(.semibold))
+                HStack {
+                    Toggle("Transparent background", isOn: $settings.transparentBackground)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.regular)
+                    Spacer()
+                    if !settings.transparentBackground {
+                        ColorPicker("Background", selection: Binding(get: { Color(nsColor: settings.background) }, set: { settings.background = NSColor($0) }), supportsOpacity: false)
+                            .labelsHidden()
+                            .help("Background color")
+                    }
+                }
+            }
             Divider()
             DesktopBackdropSettings(desktop: $settings.desktop)
+            Divider()
+            ScreenshotPlacementSettings(settings: $settings)
             Divider()
             ValueSlider(title: "Device scale", value: $settings.deviceScale, range: 0.4...1)
             DevicePositionSettings(settings: $settings)
             InspectorSwitch("Show center guides", isOn: $showCenterGuides)
-            InspectorSwitch("Snap to center", isOn: $snapToCenter)
-            Text("Guides and snapping are editing aids. Drag near either center line to align the device or headline.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Picker("Screenshot", selection: $settings.fillScreen) {
-                Text("Fit").tag(false)
-                Text("Fill").tag(true)
-            }.pickerStyle(.segmented)
-            .help("Fit keeps the whole screenshot. Fill crops to cover the screen.")
-            .disabled(hasFrame && settings.desktop.enabled)
-            Text(hasFrame && settings.desktop.enabled ? "Desktop backdrop keeps the window’s proportions. Use Window size above to resize it."
-                 : settings.fillScreen ? "Fill covers the screen, cropping the screenshot if needed."
-                 : "Fit shows the whole screenshot. Different proportions leave black bars inside the device.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            InspectorSwitch("Snap to center", isOn: $snapToCenter,
+                            info: "Guides and snapping are editing aids. Align the device or headline on the canvas, or a window screenshot inside the device screen.")
+
         }
     }
 }
 
 private struct DevicePositionSettings: View {
+    @Environment(EditorModel.self) private var editor
     @Binding var settings: CompositionSettings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Drag the device in the preview to move it with its screenshot.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            DisclosureGroup("Device position") {
-                VStack(alignment: .leading, spacing: 10) {
-                    ValueSlider(title: "Device horizontal position", value: $settings.deviceX, range: 0...1)
-                    ValueSlider(title: "Device vertical position", value: $settings.deviceY, range: 0...1)
-                    Button("Reset Device Position") { settings.resetDevicePosition() }
-                    Text("The center is positioned within the canvas. Device edges can extend beyond it.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }.padding(.top, 8)
-            }.font(.caption)
+        HStack {
+            Text("Device position").font(.subheadline.weight(.semibold))
+            Spacer()
+            Button("Reset Device to Center", systemImage: "arrow.counterclockwise") {
+                editor.beginEditing("Center Device")
+                defer { editor.endEditing() }
+                var centered = settings
+                centered.deviceX = 0.5; centered.deviceY = 0.5
+                settings = centered
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .help("Reset device position to the center of the canvas")
+            InspectorInfo(text: "Drag the device in the preview to move it with its screenshot. Use reset to center it on the canvas.")
         }
     }
 }
@@ -1057,7 +1200,7 @@ private struct ValueSlider: View {
     var body: some View {
         VStack(spacing: 4) {
             HStack {
-                Text(title)
+                Text(title).font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(value, format: .percent.precision(.fractionLength(1)))
                     .foregroundStyle(.secondary).monospacedDigit()

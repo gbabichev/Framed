@@ -398,7 +398,16 @@ nonisolated struct DesktopSettings: Codable, Equatable, Sendable {
     }
 }
 
+nonisolated enum ScreenshotPlacement: String, CaseIterable, Sendable {
+    case fit = "Fit", fill = "Fill", window = "Window"
+}
+
 nonisolated struct CompositionSettings: Sendable {
+    var windowMode = false
+    var screenshotPlacement: ScreenshotPlacement {
+        get { windowMode ? .window : fillScreen ? .fill : .fit }
+        set { windowMode = newValue == .window; fillScreen = newValue == .fill }
+    }
     var preset = ScreenshotPreset.all[0]
     var landscape = false
     var deviceScale = 0.88
@@ -559,6 +568,16 @@ nonisolated enum CompositionRenderer {
         return deviceRect(image: image, canvas: canvas, settings: settings)
     }
 
+    static func screenRect(mockup: CGImage?, opening: ScreenOpening?, canvas: CGSize,
+                           settings: CompositionSettings) -> CGRect? {
+        guard let mockup else { return targetRect(canvas: canvas, settings: settings) }
+        guard let bounds = settings.manualScreen ? settings.manualBounds : opening?.bounds else { return nil }
+        let device = deviceRect(image: mockup, canvas: canvas, settings: settings)
+        return CGRect(x: device.minX + bounds.minX * device.width,
+                      y: device.minY + (1 - bounds.maxY) * device.height,
+                      width: bounds.width * device.width, height: bounds.height * device.height)
+    }
+
     static func render(screenshot: CGImage?, mockup: CGImage?, opening: ScreenOpening?,
                        settings: CompositionSettings, maxDimension: Double? = nil, forceOpaque: Bool = false) throws -> CGImage {
         let full = settings.outputSize
@@ -628,11 +647,18 @@ nonisolated enum CompositionRenderer {
                 context.addPath(CGPath(roundedRect: screen, cornerWidth: radius, cornerHeight: radius, transform: nil))
                 context.clip()
             }
-            if settings.desktop.enabled {
+            if settings.windowMode {
+                context.setFillColor(CGColor(gray: 0, alpha: 1))
+                context.fill(device)
                 drawDesktop(screenshot: screenshot, in: screen, settings: settings.desktop, context: context)
+            } else if settings.desktop.enabled && screenshot == nil {
+                drawDesktop(screenshot: nil, in: screen, settings: settings.desktop, context: context)
             } else if let screenshot {
                 context.setFillColor(CGColor(gray: 0, alpha: 1))
                 context.fill(device)
+                if settings.desktop.enabled {
+                    drawDesktop(screenshot: nil, in: screen, settings: settings.desktop, context: context)
+                }
                 // The refined mask extends one detection pixel beneath the bezel so
                 // its source alpha supplies the visible antialiasing. Cover that same
                 // margin with image content rather than leaving a dark clipping seam.
@@ -649,13 +675,20 @@ nonisolated enum CompositionRenderer {
             context.draw(mockup, in: device)
         } else if let screenshot {
             let target = targetRect(canvas: size, settings: settings)
-            draw(screenshot, in: target, fill: settings.fillScreen, context: context)
+            if settings.windowMode {
+                context.saveGState()
+                context.clip(to: target)
+                drawDesktop(screenshot: screenshot, in: target, settings: settings.desktop, context: context)
+                context.restoreGState()
+            } else {
+                draw(screenshot, in: target, fill: settings.fillScreen, context: context)
+            }
         }
     }
 
     private static func drawDesktop(screenshot: CGImage?, in screen: CGRect,
                                     settings: DesktopSettings, context: CGContext) {
-        if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+        if settings.enabled, let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
                                      colors: [settings.topColor.cgColor, settings.bottomColor.cgColor] as CFArray,
                                      locations: [0, 1]) {
             context.drawLinearGradient(gradient, start: CGPoint(x: screen.minX, y: screen.maxY),
@@ -663,12 +696,7 @@ nonisolated enum CompositionRenderer {
                                        options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
         }
         guard let screenshot else { return }
-        let scale = min(screen.width / Double(screenshot.width), screen.height / Double(screenshot.height))
-            * settings.windowScale
-        let width = Double(screenshot.width) * scale, height = Double(screenshot.height) * scale
-        let window = CGRect(x: screen.minX + (screen.width - width) * settings.windowX,
-                            y: screen.minY + (screen.height - height) * (1 - settings.windowY),
-                            width: width, height: height)
+        let window = desktopWindowRect(screenshot: screenshot, screen: screen, settings: settings)
         context.saveGState()
         if settings.shadow {
             context.setShadow(offset: CGSize(width: 0, height: -screen.height * 0.012),
@@ -677,6 +705,15 @@ nonisolated enum CompositionRenderer {
         // Draw source alpha intact, including rounded window corners and capture shadows.
         context.draw(screenshot, in: window)
         context.restoreGState()
+    }
+
+    static func desktopWindowRect(screenshot: CGImage, screen: CGRect, settings: DesktopSettings) -> CGRect {
+        let scale = min(screen.width / Double(screenshot.width), screen.height / Double(screenshot.height))
+            * settings.windowScale
+        let width = Double(screenshot.width) * scale, height = Double(screenshot.height) * scale
+        return CGRect(x: screen.minX + (screen.width - width) * settings.windowX,
+                      y: screen.minY + (screen.height - height) * (1 - settings.windowY),
+                      width: width, height: height)
     }
 
     private static func drawCornerGlow(in context: CGContext, size: CGSize, effects: CompositionEffects) {

@@ -21,6 +21,7 @@ struct DesktopChecks {
         settings.preset = ScreenshotPreset(name: "Test", width: 400, height: 300)
         settings.deviceScale = 1
         settings.desktop.enabled = true
+        settings.windowMode = true
         settings.desktop.shadow = false
         settings.desktop.windowScale = 0.5
         let emptyDesktop = NSBitmapImageRep(cgImage: try CompositionRenderer.render(
@@ -43,15 +44,33 @@ struct DesktopChecks {
         let moved = try render()
         precondition(moved.colorAt(x: 85, y: 85)!.redComponent > 0.95, "Window must move toward top-left")
         settings.desktop.enabled = false
+        settings.desktop.windowX = 0.5; settings.desktop.windowY = 0.5
+        let bareWindow = try render()
+        precondition(bareWindow.colorAt(x: 200, y: 150)!.redComponent > 0.95,
+                     "Window placement must work without a desktop backdrop")
+        precondition(bareWindow.colorAt(x: 50, y: 50)!.blueComponent < 0.01,
+                     "Disabling the backdrop must remove the wallpaper")
+        settings.windowMode = false
         let disabled = try render()
         precondition(disabled.colorAt(x: 50, y: 50)!.blueComponent < 0.01, "Disabling must retain original black screen behavior")
-        settings.preset = ScreenshotPreset.all[0]
         settings.desktop.enabled = true
+        let fitOnDesktop = try render()
+        precondition(fitOnDesktop.colorAt(x: 110, y: 150)!.redComponent > 0.95,
+                     "Fit with a backdrop must keep full-size placement rather than window size")
+        precondition(fitOnDesktop.colorAt(x: 50, y: 50)!.blueComponent > 0.5,
+                     "Fit must retain the optional desktop behind the screenshot")
+        settings.preset = ScreenshotPreset.all[0]
+        settings.windowMode = true
         settings.desktop.shadow = true
         let data = try JSONEncoder().encode(ProjectSettings(settings))
         let restored = try JSONDecoder().decode(ProjectSettings.self, from: data).restored()
         precondition(restored.desktop == settings.desktop, "Desktop settings must survive save/open")
+        precondition(restored.windowMode, "Window placement must survive save/open")
         var legacy = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        legacy.removeValue(forKey: "windowMode")
+        let oldDesktop = try JSONDecoder().decode(ProjectSettings.self,
+            from: JSONSerialization.data(withJSONObject: legacy)).restored()
+        precondition(oldDesktop.windowMode, "Existing desktop projects must retain window placement")
         legacy.removeValue(forKey: "desktop")
         let legacyData = try JSONSerialization.data(withJSONObject: legacy)
         let legacySettings = try JSONDecoder().decode(ProjectSettings.self, from: legacyData).restored()

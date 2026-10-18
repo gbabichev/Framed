@@ -8,6 +8,20 @@ import AppKit
         let library = FrameLibrary(directory: root.appendingPathComponent("Frames"))
         let model = EditorModel(frameLibrary: library)
         precondition(!model.canUndo && !model.canRedo && !model.isDirty)
+        model.isMovingDesktopWindow = true
+        precondition(!model.canUndo && !model.isDirty, "Window move tool must not edit the project")
+        model.beginEditing("Move Window")
+        for index in 1...10 {
+            model.settings.desktop.windowX = Double(index) / 10
+            model.settings.desktop.windowY = Double(index) / 10
+        }
+        model.endEditing()
+        model.undo()
+        precondition(model.settings.desktop.windowX == 0.5 && model.settings.desktop.windowY == 0.5
+                     && !model.isDirty && !model.canUndo,
+                     "A window drag must undo both coordinates in one step")
+        precondition(model.isMovingDesktopWindow, "Undo must preserve the active editing tool")
+        model.isMovingDesktopWindow = false
         model.settings.deviceX = 0.3
         precondition(model.canUndo && model.isDirty)
         model.undo()
