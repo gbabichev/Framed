@@ -12,7 +12,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             ScreenshotSidebar(model: model)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 360)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
