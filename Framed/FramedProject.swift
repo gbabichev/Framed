@@ -3,7 +3,10 @@ import ImageIO
 import UniformTypeIdentifiers
 
 extension UTType {
-    static let framedProject = UTType(exportedAs: "com.georgebabichev.framed.project", conformingTo: .json)
+    // Keep the package distinct from the original JSON UTI: Launch Services can
+    // retain declarations from older app builds installed on the same Mac.
+    static let framedProject = UTType(exportedAs: "com.georgebabichev.framed.project-package", conformingTo: .package)
+    static let legacyFramedProject = UTType(exportedAs: "com.georgebabichev.framed.project", conformingTo: .json)
 }
 
 nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
@@ -76,7 +79,30 @@ nonisolated struct ProjectSettings: Codable, Equatable, Sendable {
 nonisolated struct ProjectImage: Codable, Sendable {
     var id: UUID
     var name: String
+    // Kept as `png` for reading legacy JSON; package assets retain their source format.
     var png: Data
+    var sourceFilename: String? = nil
+    var file: String? = nil
+
+    private enum CodingKeys: String, CodingKey { case id, name, png, sourceFilename, file }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        png = try values.decodeIfPresent(Data.self, forKey: .png) ?? Data()
+        sourceFilename = try values.decodeIfPresent(String.self, forKey: .sourceFilename)
+        file = try values.decodeIfPresent(String.self, forKey: .file)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(name, forKey: .name)
+        if !png.isEmpty { try values.encode(png, forKey: .png) }
+        try values.encodeIfPresent(sourceFilename, forKey: .sourceFilename)
+        try values.encodeIfPresent(file, forKey: .file)
+    }
 
     init(id: UUID, name: String, png: Data) {
         self.id = id; self.name = name; self.png = png
@@ -84,6 +110,12 @@ nonisolated struct ProjectImage: Codable, Sendable {
 
     init(_ imported: ImportedImage) throws {
         id = imported.id; name = imported.name
+        sourceFilename = imported.sourceFilename
+        if let original = imported.sourceData {
+            png = original
+            return
+        }
+        sourceFilename = imported.name + ".png"
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
             throw FramedError.message("Could not embed \(name) in the project.")
@@ -99,10 +131,15 @@ nonisolated struct ProjectImage: Codable, Sendable {
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
               width > 0, height > 0, width <= 16000, height <= 16000, width * height <= 60_000_000,
-              let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCache: true, kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else {
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else {
             throw FramedError.message("The embedded image ‘\(name)’ is missing or invalid.")
         }
-        return ImportedImage(id: id, name: name, image: image)
+        return ImportedImage(id: id, name: name, image: image, sourceData: png, sourceFilename: sourceFilename)
     }
 }
 
@@ -133,7 +170,10 @@ nonisolated struct FramedProject: Codable, Sendable {
     static func read(from url: URL) throws -> Self {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
-        let project = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+        var isDirectory: ObjCBool = false
+        _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        let project = isDirectory.boolValue ? try ProjectPackage.read(from: url)
+            : try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
         guard (1...3).contains(project.version) else { throw FramedError.message("This project was created by a newer version of Framed.") }
         return project
     }
@@ -141,9 +181,21 @@ nonisolated struct FramedProject: Codable, Sendable {
     func write(to url: URL) throws {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(self).write(to: url, options: .atomic)
+        try ProjectPackage.write(self, to: url)
+    }
+}
+
+/// Capture immutable images on the main actor; materialize asset records off it.
+nonisolated struct ProjectSaveSnapshot: Sendable {
+    var metadata: FramedProject
+    let screenshots: [ImportedImage]
+    let mockups: [ImportedImage]
+
+    func materialized() throws -> FramedProject {
+        var project = metadata
+        project.screenshots = try screenshots.map { try ProjectImage($0) }
+        project.mockups = try mockups.map { try ProjectImage($0) }
+        return project
     }
 }
 
@@ -176,6 +228,11 @@ nonisolated struct PreparedProject: Sendable {
 }
 
 nonisolated enum ProjectFileWorker {
+    @concurrent
+    static func write(_ snapshot: ProjectSaveSnapshot, to url: URL) async throws {
+        try snapshot.materialized().write(to: url)
+    }
+
     @concurrent
     static func read(from url: URL, progress: @Sendable (String) async -> Void) async throws -> PreparedProject {
         try Task.checkCancellation()

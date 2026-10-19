@@ -7,6 +7,20 @@
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Framed Project</string>
+			<key>LSTypeIsPackage</key>
+			<true/>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.georgebabichev.framed.project-package</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Framed Project (Legacy)</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
@@ -24,11 +38,29 @@
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
-				<string>public.json</string>
+				<string>com.apple.package</string>
 				<string>public.content</string>
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Framed Project</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.georgebabichev.framed.project-package</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>framed</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+				<string>public.content</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Framed Project (Legacy)</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.georgebabichev.framed.project</string>
 			<key>UTTypeTagSpecification</key>

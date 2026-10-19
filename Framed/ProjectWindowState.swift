@@ -100,7 +100,8 @@ final class ProjectWindowRegistry {
 
     func chooseProject() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.framedProject]
+        panel.allowedContentTypes = [.framedProject, .legacyFramedProject]
+        panel.treatsFilePackagesAsDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         open([url])
     }

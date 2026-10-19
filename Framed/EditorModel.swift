@@ -308,7 +308,8 @@ final class EditorModel {
         do {
             let prepared = try await frameLibrary.preparedFrame(for: frame)
             try Task.checkCancellation()
-            let image = ImportedImage(id: prepared.image.id, name: frame.name, image: prepared.image.image)
+            let image = ImportedImage(id: prepared.image.id, name: frame.name, image: prepared.image.image,
+                                      sourceData: prepared.image.sourceData, sourceFilename: prepared.image.sourceFilename)
             applyFrame(frame, image: image, opening: prepared.opening)
             return true
         } catch is CancellationError { return false }
@@ -509,12 +510,16 @@ final class EditorModel {
     }
     var isDirty: Bool { fingerprint != savedFingerprint }
 
-    func makeProject() throws -> FramedProject {
-        try FramedProject(version: deviceSections.isEmpty ? 2 : 3, screenshots: screenshots.map { try ProjectImage($0) }, mockups: mockups.map { try ProjectImage($0) },
-                          selectedScreenshotID: selectedScreenshotID, selectedMockupID: selectedMockupID,
-                          settings: ProjectSettings(settings), jpeg: jpeg, layouts: projectLayouts, deviceSections: deviceSections.isEmpty ? nil : deviceSections,
-                          selectedDeviceSectionID: selectedScreenshotID == nil ? selectedDeviceSectionID : nil)
+    private func projectSaveSnapshot() -> ProjectSaveSnapshot {
+        let metadata = FramedProject(version: deviceSections.isEmpty ? 2 : 3, screenshots: [], mockups: [],
+                                     selectedScreenshotID: selectedScreenshotID, selectedMockupID: selectedMockupID,
+                                     settings: ProjectSettings(settings), jpeg: jpeg, layouts: projectLayouts,
+                                     deviceSections: deviceSections.isEmpty ? nil : deviceSections,
+                                     selectedDeviceSectionID: selectedScreenshotID == nil ? selectedDeviceSectionID : nil)
+        return ProjectSaveSnapshot(metadata: metadata, screenshots: screenshots, mockups: mockups)
     }
+
+    func makeProject() throws -> FramedProject { try projectSaveSnapshot().materialized() }
 
     /// Synchronous in-memory restore for checks. User-facing opens use requestOpenProject's background worker.
     func restoreProject(_ project: FramedProject, at url: URL) throws {
@@ -535,7 +540,7 @@ final class EditorModel {
         selectedSidebarItems = selectedScreenshotID.map { [.screenshot($0)] }
             ?? selectedDeviceSectionID.map { [.device($0)] } ?? []
         jpeg = project.jpeg
-        // Match the embedded PNG bytes directly, avoiding a full-resolution PNG re-encode.
+        // Match the retained asset bytes directly, avoiding a full-resolution PNG re-encode.
         // A removed global library frame is never recreated by opening a project.
         libraryIDs = project.frameDigests.reduce(into: [:]) { result, entry in
             result[entry.key] = frameLibrary.frames.first { $0.digest == entry.value }?.id
@@ -570,11 +575,37 @@ final class EditorModel {
         } catch { self.error = error.localizedDescription; return false }
     }
 
+    private func saveProjectInBackground(to url: URL, completion: @escaping (Bool) -> Void) {
+        finishEditing()
+        lastCoalescingKey = nil
+        let snapshot = projectSaveSnapshot()
+        let savingFingerprint = fingerprint
+        let access = url.startAccessingSecurityScopedResource()
+        isBusy = true; status = "Saving project…"
+        Task { @MainActor in
+            let success: Bool
+            do {
+                try await ProjectFileWorker.write(snapshot, to: url)
+                adoptProjectURL(url)
+                savedFingerprint = savingFingerprint
+                status = "Saved \(url.lastPathComponent)."
+                success = true
+            } catch {
+                self.error = error.localizedDescription
+                success = false
+            }
+            isBusy = false
+            if access { url.stopAccessingSecurityScopedResource() }
+            completion(success)
+        }
+    }
+
     func saveProject(asNewFile: Bool = false, completion: @escaping (Bool) -> Void = { _ in }) {
         guard !isBusy, !isPresentingProjectDialog else { completion(false); return }
-        if let projectURL, !asNewFile { completion(writeProject(to: projectURL)); return }
+        if let projectURL, !asNewFile { saveProjectInBackground(to: projectURL, completion: completion); return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.framedProject]
+        panel.treatsFilePackagesAsDirectories = false
         panel.nameFieldStringValue = projectURL?.lastPathComponent ?? "Untitled.framed"
         panel.directoryURL = projectURL?.deletingLastPathComponent()
         panel.isExtensionHidden = false
@@ -583,7 +614,7 @@ final class EditorModel {
         let handle: (NSApplication.ModalResponse) -> Void = { [self] response in
             isPresentingProjectDialog = false
             guard response == .OK, let url = panel.url else { completion(false); return }
-            completion(writeProject(to: url))
+            saveProjectInBackground(to: url, completion: completion)
         }
         if let window { panel.beginSheetModal(for: window, completionHandler: handle) }
         else { handle(panel.runModal()) }
@@ -592,7 +623,8 @@ final class EditorModel {
     func openProject() {
         guard !isBusy, !isPresentingProjectDialog else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.framedProject]
+        panel.allowedContentTypes = [.framedProject, .legacyFramedProject]
+        panel.treatsFilePackagesAsDirectories = false
         isPresentingProjectDialog = true
         let handle: (NSApplication.ModalResponse) -> Void = { [self] response in
             isPresentingProjectDialog = false
@@ -887,7 +919,8 @@ final class EditorModel {
         defer { endEditing() }
         guard let index = screenshots.firstIndex(where: { $0.id == id }) else { return }
         let source = screenshots[index]
-        let duplicate = ImportedImage(id: UUID(), name: source.name + " copy", image: source.image)
+        let duplicate = ImportedImage(id: UUID(), name: source.name + " copy", image: source.image,
+                                      sourceData: source.sourceData, sourceFilename: source.sourceFilename)
         layouts[duplicate.id] = layout(for: id)
         memberships[duplicate.id] = memberships[id]
         screenshots.insert(duplicate, at: index + 1)

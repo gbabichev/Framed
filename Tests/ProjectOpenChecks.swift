@@ -7,7 +7,7 @@ struct ProjectOpenChecks {
             fatalError("Pass a .framed project to exercise background opening")
         }
         let source = URL(fileURLWithPath: argument)
-        let original = try Data(contentsOf: source)
+        let original = try projectFiles(at: source)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ProjectOpenChecks-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -71,9 +71,25 @@ struct ProjectOpenChecks {
         model.requestOpenProject(at: invalid)
         while model.isBusy { try await Task.sleep(for: .milliseconds(10)) }
         precondition(model.error != nil && model.fingerprint == baseline && model.projectURL == source)
-        let unchanged = try Data(contentsOf: source)
+        let unchanged = try projectFiles(at: source)
         precondition(original == unchanged, "Opening modified the source project")
         model.releaseProjectAccess()
         print(String(format: "PASS: background open %.3fs, dispatch %.3fs, main-actor max gap %.3fs (%d heartbeats); library matching, layout preservation, clean state, cancellation, concurrent-open rejection, and atomic decode/image failures", elapsed, dispatchTime, longestGap, beats))
     }
+    static func projectFiles(at url: URL) throws -> [String: Data] {
+        var isDirectory: ObjCBool = false
+        _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        if !isDirectory.boolValue { return ["project": try Data(contentsOf: url)] }
+        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey]) else {
+            throw FramedError.message("Couldn’t inspect test project")
+        }
+        var files: [String: Data] = [:]
+        for case let file as URL in enumerator {
+            if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                files[String(file.path.dropFirst(url.path.count))] = try Data(contentsOf: file)
+            }
+        }
+        return files
+    }
+
 }

@@ -46,7 +46,8 @@ nonisolated final class PreparedFrame: Sendable {
     let opening: ScreenOpening?
     init(image: ImportedImage, opening: ScreenOpening?) { self.image = image; self.opening = opening }
     var memoryCost: Int {
-        image.image.bytesPerRow * image.image.height + (opening.map { $0.mask.bytesPerRow * $0.mask.height } ?? 0)
+        image.image.bytesPerRow * image.image.height + (image.sourceData?.count ?? 0)
+            + (opening.map { $0.mask.bytesPerRow * $0.mask.height } ?? 0)
     }
 }
 
@@ -224,7 +225,9 @@ final class FrameLibrary {
         let name = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw FramedError.message("Enter a name for this frame.") }
         guard frames.contains(where: { $0.id == frame.id }) else { return }
-        let metadata = FrameMetadata(id: frame.id, name: name, width: frame.width, height: frame.height, digest: frame.digest, family: frame.family)
+        let metadataURL = folder(frame.id).appendingPathComponent("metadata.json")
+        var metadata = try JSONDecoder().decode(FrameMetadata.self, from: Data(contentsOf: metadataURL))
+        metadata.name = name
         try JSONEncoder().encode(metadata).write(to: folder(frame.id).appendingPathComponent("metadata.json"), options: .atomic)
         frames = sorted(frames.map { $0.id == frame.id ? SavedFrame(id: frame.id, name: name, width: frame.width, height: frame.height, digest: frame.digest, thumbnail: frame.thumbnail, family: frame.family) : $0 })
     }
@@ -262,6 +265,7 @@ nonisolated struct FrameMetadata: Codable, Sendable {
     var height: Int
     var digest: String
     var family: FrameDeviceFamily? = nil
+    var sourceFilename: String? = nil
 }
 
 /// File and image work is independent of the observable, main-actor library.
@@ -307,7 +311,7 @@ nonisolated enum FrameFileWorker {
         }
         let id = frames.contains(where: { $0.id == image.id }) ? UUID() : image.id
         let metadata = FrameMetadata(id: id, name: image.name, width: image.image.width, height: image.image.height,
-                                     digest: digest, family: FrameDeviceFamily.detect(in: image.name))
+                                     digest: digest, family: FrameDeviceFamily.detect(in: image.name), sourceFilename: image.sourceFilename)
         guard let source = CGImageSourceCreateWithData(data as CFData, nil), let thumbnail = Self.thumbnail(source) else {
             throw FramedError.message("Couldn’t create a preview for \(image.name).")
         }
@@ -342,7 +346,10 @@ nonisolated enum FrameFileWorker {
     static func image(for frame: SavedFrame, directory: URL) throws -> ImportedImage {
         let data = try Data(contentsOf: directory.appendingPathComponent(frame.id.uuidString).appendingPathComponent("frame.png"))
         guard Self.digest(data) == frame.digest else { throw FramedError.message("The stored frame ‘\(frame.name)’ is damaged. Import it again to repair it.") }
-        return try ProjectImage(id: frame.id, name: frame.name, png: data).restored()
+        var record = ProjectImage(id: frame.id, name: frame.name, png: data)
+        let metadataURL = directory.appendingPathComponent(frame.id.uuidString).appendingPathComponent("metadata.json")
+        record.sourceFilename = (try? JSONDecoder().decode(FrameMetadata.self, from: Data(contentsOf: metadataURL)))?.sourceFilename
+        return try record.restored()
     }
 
     static func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }

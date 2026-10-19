@@ -26,7 +26,7 @@ Framed turns screenshots from your device or simulator into finished images for 
 - **Make Mac windows feel at home.** Place a window capture on a gradient desktop inside a Mac frame, with adjustable window size, position, and shadow.
 - **Arrange with precision.** Move the device and headline on the canvas, use center guides and snapping, and zoom or pan to inspect the details.
 - **Export your way.** Save PNG or JPEG, adjust JPEG quality, choose a canvas size and scale, and export one image, the current device, or the entire project into a folder you choose. Entire projects are organized into device folders.
-- **Pick up where you left off.** Save a portable `.framed` project containing your screenshots, frames, and layouts. Undo and redo edits, and get a save prompt before closing unsaved work.
+- **Pick up where you left off.** Save a portable `.framed` project package containing your original screenshots, frames, and layouts. Undo and redo edits, and get a save prompt before closing unsaved work.
 
 ## Getting started
 
@@ -56,7 +56,7 @@ Framed includes canvas presets for iPhone, iPad, Mac, Apple Watch, and other App
 
 Screenshots and frames are processed locally. Framed does not upload them to a server.
 
-A `.framed` project includes its images and layouts, so you can move it without keeping track of the original image files. Imported frames are also stored in the app’s local library for reuse across projects. Adding frames to that library does not mark your project as changed.
+A `.framed` project is a package containing your original image files and layouts. It appears as one document in Finder, so you can move it without keeping track of the source files. Older projects still open and switch to the package format when saved; images already stored in those projects keep their existing format. Imported frames are also stored in the app’s local library for reuse across projects. Adding frames to that library does not mark your project as changed.
 
 ## Requirements
 

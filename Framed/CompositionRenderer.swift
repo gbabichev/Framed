@@ -7,16 +7,20 @@ nonisolated struct ImportedImage: Identifiable, Equatable, Sendable {
     let id: UUID
     let name: String
     let image: CGImage
+    let sourceData: Data?
+    let sourceFilename: String?
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
 
-    init(id: UUID, name: String, image: CGImage) {
+    init(id: UUID, name: String, image: CGImage, sourceData: Data? = nil, sourceFilename: String? = nil) {
         self.id = id; self.name = name; self.image = image
+        self.sourceData = sourceData; self.sourceFilename = sourceFilename
     }
 
     init(url: URL) throws {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+        let data = try Data(contentsOf: url)
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
@@ -32,6 +36,8 @@ nonisolated struct ImportedImage: Identifiable, Equatable, Sendable {
         self.id = UUID()
         self.name = url.deletingPathExtension().lastPathComponent
         self.image = image
+        self.sourceData = data
+        self.sourceFilename = url.lastPathComponent
     }
 }
 

@@ -11,7 +11,7 @@ A native SwiftUI macOS app for placing device screenshots inside your own transp
 4. Choose an Export Canvas size, background, scale, and Fit or Fill. When a frame has a detected or manually calibrated screen, Use Suggested Canvas offers a supported size based on its screen proportions and pixel dimensions. Selecting a frame automatically matches the canvas to its device family; the user can override it afterward. The frame keeps its orientation. Check the preview and any aspect-ratio or enlargement warnings.
 5. Click Export in the toolbar (⌘E) to open the export sheet. Review the preview, choose PNG or JPEG and the PNG transparency option, then export the selected screenshot or all screenshots. The final Export button opens a native destination picker; batch exports save directly in the user-selected folder using each screenshot’s own layout in sidebar order, with numeric suffixes to preserve existing files.
 
-Exports use sRGB at the selected pixel dimensions. In Appearance, enable Transparent background to export a PNG with alpha; the preview shows a checkerboard that is not included in the file. JPEG always uses the selected background color. Transparency is saved with the project. App Store uploads require an opaque background, so turn transparency off for those exports. The app uses user-selected file access and processes images locally. Use File → Save Project (⌘S), Save Project As (⇧⌘S), and Open Project (⌘O) to continue work later. The `.framed` project embeds screenshots and mockups along with the canvas settings, so it can be moved without its source images. Canvas edits show the native dirty-window indicator. Closing a dirty window or quitting offers Save, Don’t Save, and Cancel; cancelling or failing a save preserves your work. Exporting images does not save the project.
+Exports use sRGB at the selected pixel dimensions. In Appearance, enable Transparent background to export a PNG with alpha; the preview shows a checkerboard that is not included in the file. JPEG always uses the selected background color. Transparency is saved with the project. App Store uploads require an opaque background, so turn transparency off for those exports. The app uses user-selected file access and processes images locally. Use File → Save Project (⌘S), Save Project As (⇧⌘S), and Open Project (⌘O) to continue work later. The `.framed` document package stores a small JSON manifest and original screenshot/frame files, so it can be moved without its source images. Canvas edits show the native dirty-window indicator. Closing a dirty window or quitting offers Save, Don’t Save, and Cancel; cancelling or failing a save preserves your work. Exporting images does not save the project.
 
 ## Mockup requirements
 The screen and exterior background should be transparent. Automatic screen detection is recommended. If it needs correction, enable Adjust screen edges manually. The preview shows a blue outline (excluded from exports). Left/right edges are measured across the frame image; top/bottom edges are measured down it. Edges keep the opposite edge fixed and cannot cross. Manual mode starts from the detected screen; Reset to Detected Screen returns to automatic detection and its camera-cutout mask. Manual calibration uses a rounded rectangle instead of that mask. Fit may leave black bars when the screen and screenshot proportions differ; Fill crops to cover the screen. An opaque screen placeholder must be removed in an image editor first. Perspective/angled device transformations are not supported. Start with a frame that matches the screenshot's device and orientation; Fit preserves the screenshot with letterboxing, while Fill may crop.
@@ -35,7 +35,7 @@ See [the implementation plan](Implementation-plan.md) for the original project s
 This opens the real SwiftUI view at the reported launch-crash size and performs 12 resize passes. Run on a Mac with a graphical session:
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Framed/FrameSelection.swift Framed/FrameLibraryBrowser.swift Framed/FrameImportProgress.swift Framed/AboutView.swift Framed/SidebarFocusRecovery.swift Framed/ContentView.swift Tests/WindowLayoutChecks.swift -o /tmp/framed-window-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Framed/FrameSelection.swift Framed/FrameLibraryBrowser.swift Framed/FrameImportProgress.swift Framed/AboutView.swift Framed/SidebarFocusRecovery.swift Framed/ContentView.swift Tests/WindowLayoutChecks.swift -o /tmp/framed-window-checks
 /tmp/framed-window-checks
 ```
 
@@ -44,9 +44,9 @@ The settings pane uses SwiftUI's native `HSplitView`. The previous `.inspector` 
 ## Project checks
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/ProjectChecks.swift -o /tmp/framed-project-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/ProjectChecks.swift -o /tmp/framed-project-checks
 /tmp/framed-project-checks
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Tests/ProjectLifecycleChecks.swift -o /tmp/framed-lifecycle-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Tests/ProjectLifecycleChecks.swift -o /tmp/framed-lifecycle-checks
 /tmp/framed-lifecycle-checks
 ```
 
@@ -61,7 +61,7 @@ Click the frame preview in the inspector to open the visual picker. Search, insp
 For projects created before the library, select Save this frame to library in the inspector or Save Current Frame to Library in the picker. Opening a project matches existing library entries but does not resurrect removed ones.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FrameLibraryChecks.swift -o /tmp/framed-library-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FrameLibraryChecks.swift -o /tmp/framed-library-checks
 /tmp/framed-library-checks
 ```
 
@@ -72,7 +72,7 @@ These checks use an isolated temporary directory and cover persistence after del
 Frame imports decode images, encode PNGs, hash contents, write files, generate thumbnails, on a background executor. A native modal progress dialog reports the filename and processed count. Cancel stops the remaining work; completed frames stay available, and unfinished staging folders are removed. A non-interruptible image operation may need to finish before cancellation completes. Adding a project-embedded frame to the library and loading a saved frame also perform their image work off the main actor.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FrameImportChecks.swift -o /tmp/framed-import-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FrameImportChecks.swift -o /tmp/framed-import-checks
 /tmp/framed-import-checks /path/to/device-frames
 ```
 
@@ -83,7 +83,7 @@ The checks measure a main-actor heartbeat during real imports and exercise cance
 Use Command-click to toggle frames and Shift-click to select a range. The Selection menu contains Select All Shown, Deselect All, Remove Selected Frames, and Remove All Frames (including frames hidden by search). Removal asks for confirmation, runs off the main actor, and preserves project-embedded copies. Use Frame is available when exactly one frame (or No Frame) is selected.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/FrameSelection.swift Tests/FrameBulkChecks.swift -o /tmp/framed-bulk-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/FrameSelection.swift Tests/FrameBulkChecks.swift -o /tmp/framed-bulk-checks
 /tmp/framed-bulk-checks
 ```
 
@@ -103,14 +103,14 @@ Checks approximate screen measurements, portrait and landscape, devices with mul
 ## Transparency checks
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Tests/TransparencyChecks.swift -o /tmp/framed-transparency-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Tests/TransparencyChecks.swift -o /tmp/framed-transparency-checks
 /tmp/framed-transparency-checks
 ```
 
 ## Calibration checks
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/CalibrationChecks.swift -o /tmp/framed-calibration-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/CalibrationChecks.swift -o /tmp/framed-calibration-checks
 /tmp/framed-calibration-checks
 ```
 
@@ -130,7 +130,7 @@ Detection uses a bounded analysis image, while clipping is refined from source a
 The inspector’s Effects section offers Corner glow (color, corner, strength and size) and Device fade (top or bottom, depth and strength). Both default to off. The glow is drawn behind the device; the fade blends the screenshot and bezel together into the canvas background. With a transparent PNG, the fade reduces alpha and the glow remains translucent. JPEG composites the same effects onto the chosen background color. Effects are included in project files, dirty tracking, previews, and individual or batch exports. Older projects open with effects off.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Tests/EffectsChecks.swift -o /tmp/framed-effects-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Tests/EffectsChecks.swift -o /tmp/framed-effects-checks
 /tmp/framed-effects-checks
 ```
 
@@ -141,7 +141,7 @@ Enable Show headline in the inspector to add up to two centered lines. Each fiel
 Headline size and position scale proportionally when you change the canvas dimensions. All headline settings save with the project and participate in dirty-window tracking. Fonts are referenced by family rather than embedded; unavailable fonts fall back to the system font. Older projects open with headlines disabled. Batch export uses each screenshot’s own headline.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Tests/HeadlineChecks.swift -o /tmp/framed-headline-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Tests/HeadlineChecks.swift -o /tmp/framed-headline-checks
 /tmp/framed-headline-checks
 ```
 
@@ -152,7 +152,7 @@ Drag the phone or screenshot in the preview to move them together. Appearance �
 Enabling the headline shifts a centered device down by 4% of the canvas height, without changing its scale. Existing custom positions are preserved. Disabling the headline reverses this default shift if the device has not been repositioned. Reset Device Position restores the center, including the default headroom when a headline is enabled. Position saves with the project and participates in dirty-window tracking; older projects retain centered placement.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Tests/DevicePositionChecks.swift -o /tmp/framed-position-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Tests/DevicePositionChecks.swift -o /tmp/framed-position-checks
 /tmp/framed-position-checks
 ```
 
@@ -176,7 +176,7 @@ Right-click a screenshot for Duplicate, Move Up/Down, Move to Device, Use as Dev
 Project format version 3 adds device sections, default layouts, screenshot membership, and selected default-layout state. Version 1 and 2 projects infer sections from their saved canvas family while retaining every screenshot layout. Version 1 shared layouts are copied to every screenshot. Saving a grouped project upgrades it to version 3; older app versions reject that newer format.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/PerScreenshotChecks.swift -o /tmp/framed-layout-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/PerScreenshotChecks.swift -o /tmp/framed-layout-checks
 /tmp/framed-layout-checks
 ```
 
@@ -184,10 +184,10 @@ Checks cover independent settings and frames, duplicate isolation, preserved hea
 
 ## Responsive project opening
 
-Open Project and Finder opens read and decode the document, eagerly decode embedded images, validate layouts, detect frame masks, and hash frame PNGs on a background executor. Library matching uses those embedded PNG hashes rather than re-encoding full-resolution frames. A native Opening Project sheet shows the current stage and offers Cancel. Cancellation is checked between image operations; the current canvas stays intact until preparation succeeds. Broken projects leave the current project and its dirty state unchanged.
+Open Project and Finder opens read and decode the document, eagerly decode embedded images, validate layouts, detect frame masks, and hash frame assets on a background executor. Library matching uses those retained asset hashes rather than re-encoding full-resolution frames. A native Opening Project sheet shows the current stage and offers Cancel. Cancellation is checked between image operations; the current canvas stays intact until preparation succeeds. Broken projects leave the current project and its dirty state unchanged.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/ProjectOpenChecks.swift -o /tmp/framed-open-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/ProjectOpenChecks.swift -o /tmp/framed-open-checks
 /tmp/framed-open-checks /path/to/project-with-frames.framed
 ```
 
@@ -200,7 +200,7 @@ Use Edit → Undo (⌘Z) and Redo (⇧⌘Z) for the last 20 project edits. Devic
 Saving preserves history. Undoing back to the saved composition clears the dirty indicator; undoing past it marks the project as changed. Opening a project starts a fresh history. History belongs to each window and is not stored in the project file.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/UndoChecks.swift -o /tmp/framed-undo-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/UndoChecks.swift -o /tmp/framed-undo-checks
 /tmp/framed-undo-checks
 ```
 
@@ -211,7 +211,7 @@ Selecting a single library frame starts background preparation after a short bro
 The library keeps a small memory cache of decoded originals and clipping masks, shared by project windows. Its count limit is three frames with a 128 MiB cost target; the system may evict cached data under memory pressure. Closing the picker or changing selection cancels abandoned preparation, while an active Use Frame request keeps its shared job alive. Library reload/removal invalidates cached results. A cold frame can still take time to prepare; the picker shows progress when Use Frame has to wait.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FramePreparationChecks.swift -o /tmp/framed-preparation-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Tests/FramePreparationChecks.swift -o /tmp/framed-preparation-checks
 /tmp/framed-preparation-checks /path/to/device-frame.png
 ```
 
@@ -224,7 +224,7 @@ Frame Library offers native All, Watch, iPhone, iPad, and Mac filters alongside 
 Families are detected from Apple bezel filenames, including `Apple Watch …`, `AW Ultra …`, `iPhone …`, `iPad …`, `MacBook …`, `iMac …`, and `Mac …`. The imported family is kept when a frame is renamed. Existing library entries infer their family from their current names. Other names, including Apple TV, stay available under All. Filtering does not edit projects or enter undo history.
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/FrameSelection.swift Tests/FrameFilterChecks.swift -o /tmp/framed-filter-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/ProjectPackage.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/FrameSelection.swift Tests/FrameFilterChecks.swift -o /tmp/framed-filter-checks
 /tmp/framed-filter-checks /path/to/apple-bezel-pngs
 ```
 
@@ -266,3 +266,15 @@ The native List uses a Set selection binding for Shift-click ranges and Command-
 xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/SidebarFocusRecovery.swift Tests/SidebarFocusChecks.swift -o /tmp/framed-sidebar-focus-checks
 /tmp/framed-sidebar-focus-checks
 ```
+
+## Document package storage
+
+New saves use a Finder document package with `project.json`, `Screenshots/`, and `Frames/`. The manifest has package format/version fields and project metadata (layout schema version 2 or 3). Image records store relative asset references and original filenames; they do not embed Base64 bytes. `ProjectImage.png` remains the in-memory/legacy JSON field name, but can contain original JPEG, PNG, HEIC, or TIFF data. Imported images retain immutable source bytes alongside their decoded CGImage; frame-library imports, prepared frames, screenshot duplication, and reopened projects retain those bytes and filenames. ImageIO applies source orientation consistently on both import and reopen.
+
+Asset filenames include a content digest, a readable source stem, and the detected format extension. Duplicate content shares one asset per category. Reading validates paths, regular files, checksums, image dimensions, and project references. Legacy flat JSON versions 1–3 still open; their already-converted PNGs cannot recover the original JPEG bytes without reimporting the originals.
+
+Package saves capture a lightweight snapshot and perform serialization and disk work through the background ProjectFileWorker. NSFileCoordinator wraps package access. Saving builds a complete staging package in Foundation’s item-replacement directory and atomically replaces the destination; this also supports replacing a legacy JSON file at the same `.framed` path. Unchanged assets are hard-linked from the previous package when possible, with a byte-write fallback, so they do not need re-encoding or rewriting. Failed staging leaves the previous project intact. Save completion establishes the clean fingerprint only after the write succeeds; close/quit waits for that completion. Open and save panels treat packages as documents, and Info.plist declares `com.apple.package` conformance and LSTypeIsPackage. Packages use the distinct `com.georgebabichev.framed.project-package` UTI; legacy JSON retains `com.georgebabichev.framed.project`. Both use `.framed`, with macOS distinguishing them by directory/data conformance. This avoids stale JSON declarations from older app builds overriding package recognition. Open panels accept both types; save panels use only the package type.
+
+`Tests/ProjectPackageChecks.swift` covers original JPEG/PNG bytes and filenames, EXIF orientation, frame-library copies and renames, compact manifests, shared assets, unchanged-file reuse, replacement/Save As after deleting originals, legacy file-to-package conversion, failed replacement preservation, and malformed asset paths/checksums. Compile with the project-check source list above. ProjectOpenChecks accepts either legacy files or packages and verifies neither is modified by opening.
+
+`Tests/ProjectTypeRegistrationChecks.swift` verifies macOS content-type resolution and Finder package recognition using temporary directory and JSON fixtures with the same `.framed` extension. Build Framed, register that app with Launch Services (`lsregister -f <Framed.app>`), then compile and run this standalone AppKit check.
