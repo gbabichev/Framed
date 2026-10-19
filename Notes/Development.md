@@ -35,7 +35,7 @@ See [the implementation plan](Implementation-plan.md) for the original project s
 This opens the real SwiftUI view at the reported launch-crash size and performs 12 resize passes. Run on a Mac with a graphical session:
 
 ```sh
-xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Framed/FrameSelection.swift Framed/FrameLibraryBrowser.swift Framed/FrameImportProgress.swift Framed/AboutView.swift Framed/ContentView.swift Tests/WindowLayoutChecks.swift -o /tmp/framed-window-checks
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/ScreenshotPreset.swift Framed/CompositionRenderer.swift Framed/DeviceSections.swift Framed/FramedProject.swift Framed/FrameLibrary.swift Framed/EditorModel.swift Framed/ProjectWindowState.swift Framed/FrameSelection.swift Framed/FrameLibraryBrowser.swift Framed/FrameImportProgress.swift Framed/AboutView.swift Framed/SidebarFocusRecovery.swift Framed/ContentView.swift Tests/WindowLayoutChecks.swift -o /tmp/framed-window-checks
 /tmp/framed-window-checks
 ```
 
@@ -255,3 +255,14 @@ Export offers Selected Screenshot, Current Device, and Entire Project. Project e
 ## Sidebar multi-selection
 
 The native List uses a Set selection binding for Shift-click ranges and Command-click toggling. Default Layout remains a single template selection; screenshot selections are temporary and do not enter the project fingerprint. The preview edits the lead screenshot. Dragging any selected screenshot includes the selected screenshots in visible sidebar order; dragging an unselected row starts a single-row selection. Drop handlers accept grouped JSON UUID payloads and native multi-provider UUID drags. Batch moves preserve layouts and register one undo action, including selection restoration. The Move to Device context menu also acts on the selected screenshots. `Tests/MultiSelectionChecks.swift` verifies these model and item-provider behaviors.
+
+## Sidebar keyboard focus
+
+`SidebarFocusRecovery` is a non-intercepting background NSView on the native List. A window-local mouse-down monitor queues responder recovery after normal selection and button handling, only for clicks inside the visible sidebar while its window is key and has no attached sheet. It finds the native table/outline under that point and makes it first responder. It does not update selection, observe model changes to steal focus, or replace the List’s scroll view. Monitor teardown occurs when detached or dismantled.
+
+`Tests/SidebarFocusChecks.swift` uses an isolated hidden AppKit window to verify responder recovery from a text field, multi-selection preservation, inspector isolation, hidden-list rejection, and transparent hit testing:
+
+```sh
+xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/SidebarFocusRecovery.swift Tests/SidebarFocusChecks.swift -o /tmp/framed-sidebar-focus-checks
+/tmp/framed-sidebar-focus-checks
+```

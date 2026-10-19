@@ -166,6 +166,7 @@ private struct ScreenshotSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .background(SidebarFocusRecovery())
         .overlay {
             if model.deviceSections.isEmpty {
                 VStack(spacing: 10) {
