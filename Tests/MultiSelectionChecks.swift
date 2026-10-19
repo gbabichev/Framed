@@ -51,6 +51,37 @@ import AppKit
         model.sidebarSelections = [.screenshot(ids[0]), .screenshot(ids[1])]
         model.removeScreenshot(ids[0])
         precondition(model.sidebarSelections == [.screenshot(ids[1])], "Deleting one row must preserve other selected rows")
-        print("PASS: clean multi-selection, grouped payloads, cross-device ordering, selection preservation, undo/redo, block reordering, unselected drags and default-layout selection")
+        model.undo()
+        model.sidebarSelections = [.screenshot(ids[0]), .screenshot(ids[3])]
+        let selectedBeforeRemoval = model.sidebarSelections
+        let loadedBeforeRemoval = model.selectedScreenshotID
+        let beforeRemoval = model.fingerprint
+        model.removeScreenshotsFromContext(for: ids[0])
+        precondition(!model.screenshots.contains { $0.id == ids[0] || $0.id == ids[3] },
+                     "Context removal must delete the full selection across device sections")
+        precondition(model.selectedScreenshotID == nil && model.sidebarSelections == [.device(phone)],
+                     "An emptied section must fall back to its default layout")
+        model.undo()
+        precondition(model.fingerprint == beforeRemoval && model.sidebarSelections == selectedBeforeRemoval
+                     && model.selectedScreenshotID == loadedBeforeRemoval,
+                     "One undo must restore all deleted screenshots, layouts, memberships and selection")
+        model.redo()
+        precondition(model.screenshots.count == 2)
+        model.undo()
+        model.removeScreenshotsFromContext(for: ids[1])
+        precondition(!model.screenshots.contains { $0.id == ids[1] }
+                     && model.screenshots.contains { $0.id == ids[0] }
+                     && model.screenshots.contains { $0.id == ids[3] }
+                     && model.sidebarSelections == selectedBeforeRemoval,
+                     "Context removal of an unselected row must leave the selected group intact")
+        model.undo()
+        model.sidebarSelections = Set(ids.map(SidebarSelection.screenshot))
+        model.removeScreenshotsFromContext(for: ids[2])
+        precondition(model.screenshots.isEmpty && model.selectedScreenshotID == nil
+                     && model.deviceSections.count == 2,
+                     "Removing every screenshot must keep the device sections and clear the loaded image")
+        model.undo()
+        precondition(model.screenshots.count == 4 && model.sidebarSelections.count == 4)
+        print("PASS: clean multi-selection, grouped payloads, cross-device ordering, selection preservation, undo/redo, block reordering, unselected drags, default-layout selection, batch context removal and deletion undo/redo")
     }
 }

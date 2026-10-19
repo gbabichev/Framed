@@ -352,7 +352,7 @@ private struct DeviceScreenshotRow: View {
                 Button("Copy Style") { model.copyStyle(from: shot.id) }
                 Button("Paste Style") { model.pasteStyle(to: shot.id) }.disabled(!model.canPasteStyle)
                 Divider()
-                Button("Remove", role: .destructive) { model.removeScreenshot(shot.id) }
+                Button("Remove", role: .destructive) { model.removeScreenshotsFromContext(for: shot.id) }
             }
     }
 }

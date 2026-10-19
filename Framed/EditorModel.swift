@@ -899,18 +899,39 @@ final class EditorModel {
     }
 
     func removeScreenshot(_ id: UUID) {
-        beginEditing("Remove Screenshot")
+        removeScreenshots([id])
+    }
+
+    func removeScreenshotsFromContext(for id: UUID) {
+        // A selected row acts on the entire selection; an unselected row acts alone.
+        removeScreenshots(Set(screenshotIDsToMove(startingAt: id)))
+    }
+
+    func removeScreenshots(_ ids: Set<UUID>) {
+        let removed = ids.intersection(screenshots.map(\.id))
+        guard !removed.isEmpty else { return }
+        beginEditing(removed.count == 1 ? "Remove Screenshot" : "Remove Screenshots")
         defer { endEditing() }
-        let sectionID = memberships[id]
-        memberships.removeValue(forKey: id)
-        screenshots.removeAll { $0.id == id }
-        layouts[id] = nil
-        let remainingSelection = selectedSidebarItems.subtracting([.screenshot(id)])
+        let sectionID = selectedScreenshotID.flatMap { memberships[$0] } ?? selectedDeviceSectionID
+        let removesLoadedScreenshot = selectedScreenshotID.map(removed.contains) == true
+        let remainingSelection = selectedSidebarItems.filter { item in
+            if case .screenshot(let id) = item { return !removed.contains(id) }
+            return true
+        }
+        screenshots.removeAll { removed.contains($0.id) }
+        for id in removed {
+            memberships.removeValue(forKey: id)
+            layouts[id] = nil
+        }
         if !remainingSelection.isEmpty { sidebarSelections = remainingSelection }
-        else if selectedScreenshotID == id {
-            selectedScreenshotID = screenshots.first { memberships[$0.id] == sectionID }?.id
-            selectedDeviceSectionID = sectionID
-            if selectedScreenshotID == nil, let sectionID { selectedSidebarItems = [.device(sectionID)] }
+        else if removesLoadedScreenshot {
+            if let next = screenshots.first(where: { memberships[$0.id] == sectionID }) {
+                sidebarSelections = [.screenshot(next.id)]
+            } else if let sectionID {
+                selectDeviceSection(sectionID)
+            } else {
+                sidebarSelections = []
+            }
         }
     }
 
