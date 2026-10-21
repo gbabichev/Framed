@@ -931,7 +931,7 @@ private struct InspectorPane: View {
                         OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
                     }
                     InspectorCard("Appearance", systemImage: "paintpalette") {
-                        LayoutSettings(hasFrame: model.selectedMockup != nil, settings: $model.settings)
+                        LayoutSettings(settings: $model.settings)
                     }
                     InspectorCard("Headline", systemImage: "textformat") {
                         HeadlineSettingsView(settings: $model.settings)
@@ -1245,7 +1245,6 @@ private struct ScreenCalibrationSettings: View {
 }
 
 private struct LayoutSettings: View {
-    let hasFrame: Bool
     @AppStorage(EditorPreferences.centerGuides) private var showCenterGuides = false
     @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
     @Binding var settings: CompositionSettings

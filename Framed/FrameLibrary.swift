@@ -118,6 +118,8 @@ final class FrameLibrary {
 
     func markImportCancelling() { isCancellingImport = true }
 
+    // Used by FrameImportChecks and FramePreparationChecks outside the Xcode app target.
+    // periphery:ignore
     func importFiles(_ urls: [URL]) async -> [SavedFrame] {
         await importSources(urls.map { .file($0) })
     }
@@ -160,11 +162,8 @@ final class FrameLibrary {
         if !frames.contains(where: { $0.id == frame.id }) { frames = sorted(frames + [frame]) }
     }
 
-    func matching(_ image: ImportedImage) throws -> SavedFrame? {
-        let digest = FrameFileWorker.digest(try ProjectImage(image).png)
-        return frames.first { $0.digest == digest }
-    }
-
+    // Used by FrameLibraryChecks and synchronous frame selection checks outside the Xcode app target.
+    // periphery:ignore
     func image(for frame: SavedFrame) throws -> ImportedImage {
         try FrameFileWorker.image(for: frame, directory: directory)
     }
@@ -232,6 +231,8 @@ final class FrameLibrary {
         frames = sorted(frames.map { $0.id == frame.id ? SavedFrame(id: frame.id, name: name, width: frame.width, height: frame.height, digest: frame.digest, thumbnail: frame.thumbnail, family: frame.family) : $0 })
     }
 
+    // Used by FrameLibraryChecks outside the Xcode app target.
+    // periphery:ignore
     func remove(_ frame: SavedFrame) throws {
         guard !isImporting, !isRemoving else { throw FramedError.message("Wait for the current library operation to finish.") }
         // This removes only the reusable copy; each open/saved project owns its images.

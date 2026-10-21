@@ -95,6 +95,8 @@ final class EditorModel {
             isUpdatingSidebarSelection = false
         }
     }
+    // Used by DeviceSectionChecks outside the Xcode app target.
+    // periphery:ignore
     var sidebarSelection: SidebarSelection? {
         get { selectedScreenshotID.map(SidebarSelection.screenshot) ?? selectedDeviceSectionID.map(SidebarSelection.device) }
         set { sidebarSelections = newValue.map { [$0] } ?? [] }
@@ -191,6 +193,8 @@ final class EditorModel {
         let style = ScreenshotLayout(settings: settings, mockupID: section.mockupID)
         for shot in screenshots where memberships[shot.id] == id { applyStyle(style, to: shot.id) }
     }
+    // Used by DeviceSectionChecks outside the Xcode app target.
+    // periphery:ignore
     func moveScreenshot(_ id: UUID, toSection sectionID: UUID) {
         guard deviceSections.contains(where: { $0.id == sectionID }), screenshots.contains(where: { $0.id == id }) else { return }
         recordEdit("Move Screenshot to Device")
@@ -281,12 +285,16 @@ final class EditorModel {
         return frameLibrary.frames.contains { $0.id == id }
     }
 
+    // Used by FrameLibraryChecks outside the Xcode app target.
+    // periphery:ignore
     func saveSelectedFrameToLibrary() {
         guard let frame = selectedMockup else { return }
         do { libraryIDs[frame.id] = try frameLibrary.store(frame).id }
         catch { frameLibrary.error = error.localizedDescription }
     }
 
+    // Used by frame selection regression checks outside the Xcode app target.
+    // periphery:ignore
     @discardableResult
     func useLibraryFrame(_ frame: SavedFrame) -> Bool {
         do {
@@ -522,9 +530,13 @@ final class EditorModel {
         return ProjectSaveSnapshot(metadata: metadata, screenshots: screenshots, mockups: mockups)
     }
 
+    // Used by project regression checks outside the Xcode app target.
+    // periphery:ignore
     func makeProject() throws -> FramedProject { try projectSaveSnapshot().materialized() }
 
     /// Synchronous in-memory restore for checks. User-facing opens use requestOpenProject's background worker.
+    // Used by project regression checks outside the Xcode app target.
+    // periphery:ignore
     func restoreProject(_ project: FramedProject, at url: URL) throws {
         applyPreparedProject(try ProjectFileWorker.prepare(project), at: url)
     }
@@ -565,6 +577,8 @@ final class EditorModel {
         hasProjectAccess = false
     }
 
+    // Used by project regression checks outside the Xcode app target.
+    // periphery:ignore
     @discardableResult
     func writeProject(to url: URL) -> Bool {
         finishEditing()
@@ -959,10 +973,6 @@ final class EditorModel {
         screenshots.insert(contentsOf: moving, at: insertion)
     }
 
-    func insertScreenshot(_ id: UUID, in sectionID: UUID, at destination: Int) {
-        moveScreenshots([id], toSection: sectionID, at: destination)
-    }
-
     func moveScreenshots(_ ids: Set<UUID>, toSection sectionID: UUID, at destination: Int? = nil) {
         guard deviceSections.contains(where: { $0.id == sectionID }) else { return }
         let moving = sidebarOrderedScreenshots.filter { ids.contains($0.id) }
@@ -1015,6 +1025,8 @@ final class EditorModel {
         }
         applyStyle(style.layout, to: id)
     }
+    // Used by PerScreenshotChecks and UndoChecks outside the Xcode app target.
+    // periphery:ignore
     func applyStyleToAll(from id: UUID) {
         beginEditing("Apply Style to All")
         defer { endEditing() }

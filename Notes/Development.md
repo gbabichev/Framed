@@ -280,3 +280,7 @@ Package saves capture a lightweight snapshot and perform serialization and disk 
 `Tests/ProjectTypeRegistrationChecks.swift` verifies macOS content-type resolution and Finder package recognition using temporary directory and JSON fixtures with the same `.framed` extension. Build Framed, register that app with Launch Services (`lsregister -f <Framed.app>`), then compile and run this standalone AppKit check.
 
 Project opening reports ordered per-image progress for package asset reads, screenshot decoding, frame decoding, and screen detection. Counts apply to the named stage rather than an estimated overall percentage; the current asset name remains visible during long operations. A synchronous-worker/AsyncStream bridge publishes updates without moving image work onto the main actor. Cancellation retains the current project and stops between images. ProjectOpenChecks verifies stage counts, named assets, update order, responsiveness, and cancellation.
+
+## Unused-code checks
+
+Run `periphery scan` from the repository root. `.periphery.yml` selects the app scheme and retains properties read by synthesized Equatable comparisons (including thumbnail task keys and project dirty-state fingerprints). The standalone `Tests/*Checks.swift` executables are not Xcode test targets, so their explicitly documented entry points have narrowly scoped `periphery:ignore` comments. Review those references before removing a retained helper; no source files or runtime callbacks are broadly excluded from scanning.

@@ -1,0 +1,6 @@
+project: Framed.xcodeproj
+schemes:
+  - Framed
+# Task identities and project dirty-state fingerprints use synthesized equality.
+retain_equatable_properties: true
+disable_update_check: true

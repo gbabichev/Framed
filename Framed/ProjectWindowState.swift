@@ -81,14 +81,13 @@ final class ProjectWindowRegistry {
     private var entries: [Entry] = []
     private final class Entry {
         weak var window: NSWindow?
-        weak var model: EditorModel?
-        init(window: NSWindow, model: EditorModel) { self.window = window; self.model = model }
+        init(window: NSWindow) { self.window = window }
     }
     var needsWindow: Bool { !pending.isEmpty }
 
     func attach(window: NSWindow, model: EditorModel) {
         entries.removeAll { $0.window == nil }
-        entries.append(Entry(window: window, model: model))
+        entries.append(Entry(window: window))
         guard !pending.isEmpty else { return }
         let url = pending.removeFirst()
         Task { @MainActor in
@@ -203,10 +202,6 @@ final class ProjectTerminationCoordinator {
 
     func unregister(window: NSWindow) {
         entries.removeValue(forKey: ObjectIdentifier(window))
-    }
-
-    var hasDirtyDocumentWindow: Bool {
-        !currentDirtyEntries().isEmpty
     }
 
     func applicationShouldTerminate(_ application: NSApplication) -> NSApplication.TerminateReply {

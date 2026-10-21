@@ -446,6 +446,8 @@ nonisolated struct CompositionSettings: Sendable {
             headline.enabled = newValue
         }
     }
+    // Used by DevicePositionChecks outside the Xcode app target.
+    // periphery:ignore
     mutating func resetDevicePosition() {
         deviceX = 0.5; deviceY = headline.enabled ? 0.54 : 0.5
     }
