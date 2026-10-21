@@ -12,7 +12,27 @@ struct ProjectOpenChecks {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let library = FrameLibrary(directory: root.appendingPathComponent("Frames"))
-        let expected = try await ProjectFileWorker.read(from: source) { _ in }
+        let progressLog = LoadingProgressLog()
+        let expected = try await ProjectFileWorker.read(from: source) { update in
+            await progressLog.append(update)
+        }
+        let updates = await progressLog.updates
+        precondition(updates.first?.stage == .readingProject && updates.last?.stage == .finishing)
+        for (stage, total) in [(ProjectLoadingProgress.Stage.screenshots, expected.screenshots.count),
+                               (.frames, expected.mockups.count), (.screenDetection, expected.mockups.count)] where total > 0 {
+            let events = updates.filter { $0.stage == stage }
+            precondition(events.count == total * 2 && events.first?.completed == 0 && events.last?.completed == total,
+                         "Every image must report progress before and after processing")
+            precondition(events.allSatisfy { $0.total == total && $0.itemName != nil })
+            precondition(zip(events, events.dropFirst()).allSatisfy { $0.completed <= $1.completed },
+                         "Progress must be delivered in order")
+        }
+        if (try source.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true {
+            let events = updates.filter { $0.stage == .readingImages }
+            let total = expected.screenshots.count + expected.mockups.count
+            precondition(events.count == total * 2 && events.last?.completed == total,
+                         "Package reading must report individual asset progress")
+        }
         _ = await library.importSources(expected.mockups.map { .image($0) })
         let model = EditorModel(frameLibrary: library)
         var beats = 0, longestGap = 0.0
@@ -74,7 +94,7 @@ struct ProjectOpenChecks {
         let unchanged = try projectFiles(at: source)
         precondition(original == unchanged, "Opening modified the source project")
         model.releaseProjectAccess()
-        print(String(format: "PASS: background open %.3fs, dispatch %.3fs, main-actor max gap %.3fs (%d heartbeats); library matching, layout preservation, clean state, cancellation, concurrent-open rejection, and atomic decode/image failures", elapsed, dispatchTime, longestGap, beats))
+        print(String(format: "PASS: background open %.3fs, dispatch %.3fs, main-actor max gap %.3fs (%d heartbeats); library matching, layout preservation, clean state, cancellation, concurrent-open rejection, atomic decode/image failures, and ordered per-image progress", elapsed, dispatchTime, longestGap, beats))
     }
     static func projectFiles(at url: URL) throws -> [String: Data] {
         var isDirectory: ObjCBool = false
@@ -92,4 +112,9 @@ struct ProjectOpenChecks {
         return files
     }
 
+}
+
+private actor LoadingProgressLog {
+    private(set) var updates: [ProjectLoadingProgress] = []
+    func append(_ update: ProjectLoadingProgress) { updates.append(update) }
 }

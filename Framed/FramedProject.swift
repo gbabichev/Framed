@@ -167,12 +167,12 @@ nonisolated struct FramedProject: Codable, Sendable {
     var deviceSections: [DeviceSection]? = nil
     var selectedDeviceSectionID: UUID? = nil
 
-    static func read(from url: URL) throws -> Self {
+    static func read(from url: URL, progress: (ProjectLoadingProgress) -> Void = { _ in }) throws -> Self {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         var isDirectory: ObjCBool = false
         _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-        let project = isDirectory.boolValue ? try ProjectPackage.read(from: url)
+        let project = isDirectory.boolValue ? try ProjectPackage.read(from: url, progress: progress)
             : try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
         guard (1...3).contains(project.version) else { throw FramedError.message("This project was created by a newer version of Framed.") }
         return project
@@ -227,6 +227,29 @@ nonisolated struct PreparedProject: Sendable {
     let selectedDeviceSectionID: UUID?
 }
 
+/// Counts describe the current stage rather than an estimated overall percentage.
+nonisolated struct ProjectLoadingProgress: Sendable, Equatable {
+    enum Stage: Sendable {
+        case readingProject, readingImages, screenshots, frames, screenDetection, layouts, finishing
+    }
+    var stage: Stage
+    var completed = 0
+    var total = 0
+    var itemName: String? = nil
+
+    var message: String {
+        switch stage {
+        case .readingProject: "Reading project…"
+        case .readingImages: "Reading image files…"
+        case .screenshots: "Preparing screenshots…"
+        case .frames: "Preparing device frames…"
+        case .screenDetection: "Detecting device screens…"
+        case .layouts: "Checking layouts…"
+        case .finishing: "Finishing up…"
+        }
+    }
+}
+
 nonisolated enum ProjectFileWorker {
     @concurrent
     static func write(_ snapshot: ProjectSaveSnapshot, to url: URL) async throws {
@@ -234,22 +257,52 @@ nonisolated enum ProjectFileWorker {
     }
 
     @concurrent
-    static func read(from url: URL, progress: @Sendable (String) async -> Void) async throws -> PreparedProject {
-        try Task.checkCancellation()
-        await progress("Reading project…")
-        let project = try autoreleasepool { try FramedProject.read(from: url) }
-        try Task.checkCancellation()
-        await progress("Preparing screenshots and device frames…")
-        return try autoreleasepool { try prepare(project) }
+    static func read(from url: URL, progress: @escaping @Sendable (ProjectLoadingProgress) async -> Void) async throws -> PreparedProject {
+        // Bridge synchronous decoding/file coordination to ordered UI updates.
+        // The consumer can publish progress while an individual image is processing.
+        let (updates, continuation) = AsyncStream<ProjectLoadingProgress>.makeStream()
+        let reporter = Task {
+            for await update in updates { await progress(update) }
+        }
+        do {
+            try Task.checkCancellation()
+            continuation.yield(ProjectLoadingProgress(stage: .readingProject))
+            let project = try autoreleasepool {
+                try FramedProject.read(from: url) { continuation.yield($0) }
+            }
+            try Task.checkCancellation()
+            let prepared = try autoreleasepool {
+                try prepare(project) { continuation.yield($0) }
+            }
+            continuation.yield(ProjectLoadingProgress(stage: .finishing))
+            continuation.finish()
+            await reporter.value
+            try Task.checkCancellation()
+            return prepared
+        } catch {
+            continuation.finish()
+            await reporter.value
+            throw error
+        }
     }
 
-    static func prepare(_ project: FramedProject) throws -> PreparedProject {
+    static func prepare(_ project: FramedProject, progress: (ProjectLoadingProgress) -> Void = { _ in }) throws -> PreparedProject {
         try Task.checkCancellation()
         guard (1...3).contains(project.version) else { throw FramedError.message("Unsupported project version.") }
         // Decode and validate everything before replacing the current canvas.
         let restoredSettings = try project.settings.restored()
-        let shots = try project.screenshots.map { try Task.checkCancellation(); return try $0.restored() }
-        let frames = try project.mockups.map { try Task.checkCancellation(); return try $0.restored() }
+        func restore(_ records: [ProjectImage], stage: ProjectLoadingProgress.Stage) throws -> [ImportedImage] {
+            try records.enumerated().map { index, record in
+                try Task.checkCancellation()
+                progress(ProjectLoadingProgress(stage: stage, completed: index, total: records.count, itemName: record.name))
+                let image = try autoreleasepool { try record.restored() }
+                progress(ProjectLoadingProgress(stage: stage, completed: index + 1, total: records.count, itemName: record.name))
+                return image
+            }
+        }
+        let shots = try restore(project.screenshots, stage: .screenshots)
+        let frames = try restore(project.mockups, stage: .frames)
+        progress(ProjectLoadingProgress(stage: .layouts))
         let allIDs = (shots + frames).map(\.id)
         guard Set(allIDs).count == allIDs.count,
               project.selectedScreenshotID == nil || shots.contains(where: { $0.id == project.selectedScreenshotID }),
@@ -317,8 +370,10 @@ nonisolated enum ProjectFileWorker {
         var digests: [UUID: String] = [:]
         for (index, frame) in frames.enumerated() {
             try Task.checkCancellation()
+            progress(ProjectLoadingProgress(stage: .screenDetection, completed: index, total: frames.count, itemName: frame.name))
             if let opening = ScreenOpening.detect(in: frame.image) { detected[frame.id] = opening }
             digests[frame.id] = FrameFileWorker.digest(project.mockups[index].png)
+            progress(ProjectLoadingProgress(stage: .screenDetection, completed: index + 1, total: frames.count, itemName: frame.name))
         }
         try Task.checkCancellation()
         return PreparedProject(screenshots: shots, mockups: frames, openings: detected, frameDigests: digests,

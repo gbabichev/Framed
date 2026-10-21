@@ -256,7 +256,10 @@ final class EditorModel {
     private(set) var isOpeningProject = false
     private(set) var isCancellingProjectOpen = false
     private(set) var openingProjectName = ""
-    private(set) var projectOpenMessage = ""
+    private(set) var projectOpenProgress = ProjectLoadingProgress(stage: .readingProject)
+    var projectOpenMessage: String {
+        isCancellingProjectOpen ? "Stopping after the current image…" : projectOpenProgress.message
+    }
     @ObservationIgnored private var projectOpenTask: Task<Void, Never>?
 
     init(frameLibrary: FrameLibrary = .shared) {
@@ -642,7 +645,7 @@ final class EditorModel {
             let previousStatus = status
             isBusy = true; isOpeningProject = true; isCancellingProjectOpen = false
             openingProjectName = url.lastPathComponent
-            projectOpenMessage = "Reading project…"
+            projectOpenProgress = ProjectLoadingProgress(stage: .readingProject)
             status = "Opening \(url.lastPathComponent)…"
             projectOpenTask = Task { @MainActor [self] in
                 defer {
@@ -650,8 +653,8 @@ final class EditorModel {
                     self.projectOpenTask = nil
                 }
                 do {
-                    let prepared = try await ProjectFileWorker.read(from: url) { [self] message in
-                        await MainActor.run { if !self.isCancellingProjectOpen { self.projectOpenMessage = message } }
+                    let prepared = try await ProjectFileWorker.read(from: url) { [self] progress in
+                        await MainActor.run { if !self.isCancellingProjectOpen { self.projectOpenProgress = progress } }
                     }
                     try Task.checkCancellation()
                     self.applyPreparedProject(prepared, at: url)
@@ -668,7 +671,6 @@ final class EditorModel {
     func cancelProjectOpen() {
         guard isOpeningProject else { return }
         isCancellingProjectOpen = true
-        projectOpenMessage = "Stopping after the current image…"
         projectOpenTask?.cancel()
     }
 

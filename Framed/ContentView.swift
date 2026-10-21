@@ -125,13 +125,28 @@ struct ContentView: View {
 private struct ProjectOpenProgress: View {
     let model: EditorModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let progress = model.projectOpenProgress
+        VStack(alignment: .leading, spacing: 18) {
             Text(model.isCancellingProjectOpen ? "Stopping…" : "Opening Project")
                 .font(.headline)
             Text(model.openingProjectName).lineLimit(1).truncationMode(.middle)
-            HStack(spacing: 12) {
-                ProgressView().controlSize(.small)
-                Text(model.projectOpenMessage).font(.callout).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(model.projectOpenMessage).font(.callout)
+                    Spacer(minLength: 8)
+                    if progress.total > 0 {
+                        Text("\(progress.completed) of \(progress.total)")
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+                if progress.total > 0 {
+                    ProgressView(value: Double(progress.completed), total: Double(progress.total))
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
+                Text(progress.itemName ?? (progress.stage == .layouts ? "Restoring device sections and saved layouts…" : progress.stage == .finishing ? "Getting your canvas ready…" : "Reading project information…"))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
             }
             HStack {
                 Spacer()
@@ -141,7 +156,7 @@ private struct ProjectOpenProgress: View {
             }
         }
         .padding(24)
-        .frame(width: 400)
+        .frame(width: 440)
         .interactiveDismissDisabled()
     }
 }

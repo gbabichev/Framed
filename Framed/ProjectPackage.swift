@@ -10,7 +10,7 @@ nonisolated enum ProjectPackage {
         var project: FramedProject
     }
 
-    static func read(from url: URL) throws -> FramedProject {
+    static func read(from url: URL, progress: (ProjectLoadingProgress) -> Void = { _ in }) throws -> FramedProject {
         try coordinatedRead(url) { root in
             let manifestURL = root.appendingPathComponent("project.json")
             try requireRegularFile(manifestURL)
@@ -19,11 +19,14 @@ nonisolated enum ProjectPackage {
                 throw FramedError.message("This project package uses an unsupported format.")
             }
             var project = manifest.project
+            let total = project.screenshots.count + project.mockups.count
+            var completed = 0
             func hydrate(_ record: ProjectImage, folder: String) throws -> ProjectImage {
                 try Task.checkCancellation()
                 guard let path = record.file else { throw FramedError.message("A project image is missing its file reference.") }
                 let asset = try assetURL(path, folder: folder, root: root)
                 try requireRegularFile(asset)
+                progress(ProjectLoadingProgress(stage: .readingImages, completed: completed, total: total, itemName: record.name))
                 var record = record
                 record.png = try Data(contentsOf: asset)
                 let digest = asset.lastPathComponent.split(separator: "-", maxSplits: 1).first.map(String.init)
@@ -31,6 +34,8 @@ nonisolated enum ProjectPackage {
                     throw FramedError.message("The project image ‘\(record.name)’ is damaged.")
                 }
                 record.file = nil
+                completed += 1
+                progress(ProjectLoadingProgress(stage: .readingImages, completed: completed, total: total, itemName: record.name))
                 return record
             }
             project.screenshots = try project.screenshots.map { try hydrate($0, folder: "Screenshots") }
