@@ -171,11 +171,15 @@ private struct ScreenshotSidebar: View {
 
     var body: some View {
         List(selection: $model.sidebarSelections) {
-            Section("Project") {
+            Section {
                 Label("Project Style", systemImage: "paintbrush.pointed")
                     .font(.callout)
                     .tag(SidebarSelection.projectStyle)
                     .help("Shared headline and effects across devices and screenshots")
+            } header: {
+                Text("Project")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
             ForEach(model.sidebarGroups) { group in
                 DeviceSidebarSection(model: model, group: group,
@@ -285,15 +289,15 @@ private struct DeviceSidebarSection: View {
                 _ = acceptDrop(providers, at: destination)
             }
             if group.screenshots.isEmpty {
-                Button("Add screenshots…", systemImage: "photo.badge.plus") {
-                    model.selectDeviceSection(group.id)
-                    model.importImages(mockups: false)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
-                    acceptDrop(providers)
-                }
+                Text("Drop screenshots here")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                    .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { providers in
+                        acceptDrop(providers)
+                    }
             }
         } header: {
             HStack {
@@ -302,13 +306,12 @@ private struct DeviceSidebarSection: View {
                 } label: {
                     Label {
                         Text(group.section.title)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                     } icon: {
                         Image(systemName: group.section.device.symbol)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 11, weight: .medium))
                     }
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .help(group.section.title)
                 }
@@ -318,20 +321,10 @@ private struct DeviceSidebarSection: View {
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(.quaternary.opacity(0.5), in: Capsule())
                     .padding(.trailing, 10)
             }
-            .padding(.vertical, 8)
-            .overlay(alignment: .bottom) {
-                Color(nsColor: .separatorColor)
-                    .opacity(0.5)
-                    .frame(height: 1)
-                    .allowsHitTesting(false)
-            }
+            .padding(.vertical, 4)
             .contextMenu {
-                Button("Edit Default Layout") { model.selectDeviceSection(group.id) }
                 Button("Rename…") { requestRename(group.section) }
                 Button("Duplicate Device Layout") { model.duplicateDeviceLayout(group.id) }
                 Button("Import Screenshots…") {
@@ -404,6 +397,8 @@ private struct ScreenshotRow: View {
     let opening: ScreenOpening?
     let settings: CompositionSettings
     let remove: () -> Void
+    @State private var isHovered = false
+    @FocusState private var isRemoveFocused: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -418,12 +413,15 @@ private struct ScreenshotRow: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
+            .focused($isRemoveFocused)
+            .opacity(isHovered || isRemoveFocused ? 1 : 0)
             .foregroundStyle(.secondary)
             .help("Remove screenshot from project")
             .accessibilityLabel(Text("Remove \(name)"))
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
     }
 }
 
