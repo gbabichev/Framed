@@ -161,13 +161,25 @@ private struct ProjectOpenProgress: View {
     }
 }
 
+private enum SidebarRenameTarget {
+    case device(DeviceSection)
+    case screenshot(ImportedImage)
+
+    var title: String {
+        switch self {
+        case .device: "Rename Device Section"
+        case .screenshot: "Rename Screenshot"
+        }
+    }
+}
+
 private struct ScreenshotSidebar: View {
     @Bindable var model: EditorModel
     @State private var isDropTargeted = false
     @State private var pendingRemoval: DeviceSection?
     @State private var pendingApply: DeviceSection?
-    @State private var pendingRename: DeviceSection?
-    @State private var sectionName = ""
+    @State private var pendingRename: SidebarRenameTarget?
+    @State private var itemName = ""
 
     var body: some View {
         List(selection: $model.sidebarSelections) {
@@ -186,7 +198,10 @@ private struct ScreenshotSidebar: View {
                     requestRemoval: { pendingRemoval = $0 },
                     requestApply: { pendingApply = $0 },
                     requestRename: { section in
-                        sectionName = section.title; pendingRename = section
+                        itemName = section.title; pendingRename = .device(section)
+                    },
+                    requestScreenshotRename: { shot in
+                        itemName = shot.name; pendingRename = .screenshot(shot)
                     })
             }
         }
@@ -242,16 +257,19 @@ private struct ScreenshotSidebar: View {
         } message: {
             Text("Updates frames, canvas, appearance, headline styling, and effects in this section. Each screenshot’s headline text is kept.")
         }
-        .alert("Rename Device Section", isPresented: Binding(
+        .alert(pendingRename?.title ?? "Rename", isPresented: Binding(
             get: { pendingRename != nil }, set: { if !$0 { pendingRename = nil } })) {
-            TextField("Name", text: $sectionName)
+            TextField("Name", text: $itemName)
             Button("Cancel", role: .cancel) { pendingRename = nil }
-            if let section = pendingRename {
+            if let target = pendingRename {
                 Button("Rename") {
                     pendingRename = nil
-                    model.renameDeviceSection(section.id, to: sectionName)
+                    switch target {
+                    case .device(let section): model.renameDeviceSection(section.id, to: itemName)
+                    case .screenshot(let shot): model.renameScreenshot(shot.id, to: itemName)
+                    }
                 }
-                .disabled(sectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
@@ -264,6 +282,7 @@ private struct DeviceSidebarSection: View {
     let requestRemoval: (DeviceSection) -> Void
     let requestApply: (DeviceSection) -> Void
     let requestRename: (DeviceSection) -> Void
+    let requestScreenshotRename: (ImportedImage) -> Void
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -281,7 +300,7 @@ private struct DeviceSidebarSection: View {
                     acceptDrop(providers)
                 }
             ForEach(group.screenshots) { shot in
-                DeviceScreenshotRow(model: model, shot: shot, sectionID: group.id)
+                DeviceScreenshotRow(model: model, shot: shot, sectionID: group.id, requestRename: requestScreenshotRename)
                     .tag(SidebarSelection.screenshot(shot.id))
             }
             .onMove { model.reorderScreenshots(in: group.id, from: $0, to: $1) }
@@ -356,6 +375,7 @@ private struct DeviceScreenshotRow: View {
     let model: EditorModel
     let shot: ImportedImage
     let sectionID: UUID
+    let requestRename: (ImportedImage) -> Void
 
     var body: some View {
         let layout = model.layout(for: shot.id)
@@ -370,6 +390,7 @@ private struct DeviceScreenshotRow: View {
                 return model.handleSidebarDrop(providers, sectionID: sectionID, at: index)
             }
             .contextMenu {
+                Button("Rename…") { requestRename(shot) }
                 Button("Duplicate") { model.duplicateScreenshot(shot.id) }
                 Button("Move Up") { model.moveScreenshot(shot.id, by: -1) }
                 Button("Move Down") { model.moveScreenshot(shot.id, by: 1) }

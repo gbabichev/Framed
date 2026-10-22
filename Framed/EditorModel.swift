@@ -614,7 +614,8 @@ final class EditorModel {
         ProjectFingerprint(screenshots: screenshots.map(\.id), mockups: mockups.map(\.id),
                            layouts: projectLayouts, emptySettings: screenshots.isEmpty ? ProjectSettings(emptySettings) : nil,
                            emptyMockupID: screenshots.isEmpty ? emptyMockupID : nil, jpeg: jpeg,
-                           deviceSections: deviceSections, memberships: memberships, projectStyle: projectStyle)
+                           deviceSections: deviceSections, memberships: memberships, projectStyle: projectStyle,
+                           screenshotNames: Dictionary(uniqueKeysWithValues: screenshots.map { ($0.id, $0.name) }))
     }
     var isDirty: Bool { fingerprint != savedFingerprint }
 
@@ -1047,6 +1048,22 @@ final class EditorModel {
                 sidebarSelections = []
             }
         }
+    }
+
+    func renameScreenshot(_ id: UUID, to name: String) {
+        guard let index = screenshots.firstIndex(where: { $0.id == id }) else { return }
+        var cleaned = name.components(separatedBy: .controlCharacters).joined(separator: " ")
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
+        while cleaned.utf8.count > 180 { cleaned.removeLast() }
+        guard !cleaned.isEmpty, cleaned != screenshots[index].name else { return }
+        beginEditing("Rename Screenshot")
+        defer { endEditing() }
+        let source = screenshots[index]
+        screenshots[index] = ImportedImage(id: source.id, name: cleaned, image: source.image,
+                                           sourceData: source.sourceData, sourceFilename: source.sourceFilename)
     }
 
     func duplicateScreenshot(_ id: UUID) {

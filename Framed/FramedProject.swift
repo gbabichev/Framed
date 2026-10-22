@@ -213,6 +213,7 @@ struct ProjectFingerprint: Equatable {
     var deviceSections: [DeviceSection] = []
     var memberships: [UUID: UUID] = [:]
     var projectStyle = ProjectStyle()
+    var screenshotNames: [UUID: String] = [:]
 }
 
 /// Fully prepared away from the UI; publishing it only replaces in-memory state.

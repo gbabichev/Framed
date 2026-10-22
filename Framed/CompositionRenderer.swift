@@ -9,7 +9,8 @@ nonisolated struct ImportedImage: Identifiable, Equatable, Sendable {
     let image: CGImage
     let sourceData: Data?
     let sourceFilename: String?
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    // Display-name edits must refresh rows without comparing full image buffers.
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.name == rhs.name }
 
     init(id: UUID, name: String, image: CGImage, sourceData: Data? = nil, sourceFilename: String? = nil) {
         self.id = id; self.name = name; self.image = image
