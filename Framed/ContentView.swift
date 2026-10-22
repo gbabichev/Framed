@@ -321,6 +321,7 @@ private struct DeviceSidebarSection: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(.quaternary.opacity(0.5), in: Capsule())
+                    .padding(.trailing, 10)
             }
             .padding(.vertical, 8)
             .overlay(alignment: .bottom) {
