@@ -253,6 +253,15 @@ nonisolated struct HeadlineSettings: Codable, Equatable, Sendable {
     var red = 0.08, green = 0.08, blue = 0.10
     var x = 0.5, y = 0.055
 
+    /// Content and typography are shared, but each canvas keeps its placement.
+    func positioned(like local: Self) -> Self {
+        var copy = self
+        copy.x = local.x; copy.y = local.y
+        return copy
+    }
+
+    var sharedStyle: Self { positioned(like: Self()) }
+
     var color: NSColor {
         get { NSColor(srgbRed: red, green: green, blue: blue, alpha: 1) }
         set {

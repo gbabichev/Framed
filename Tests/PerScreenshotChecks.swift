@@ -10,12 +10,13 @@ struct PerScreenshotChecks {
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         context.setFillColor(NSColor.red.cgColor); context.fill(CGRect(x: 0, y: 0, width: 100, height: 200))
         let image = context.makeImage()!
-        let a = ImportedImage(id: UUID(), name: "A", image: image)
-        let b = ImportedImage(id: UUID(), name: "B", image: image)
-        let c = ImportedImage(id: UUID(), name: "C", image: image)
         let library = FrameLibrary(directory: root.appendingPathComponent("Frames"))
         let model = EditorModel(frameLibrary: library)
-        model.screenshots = [a, b, c]; model.selectedScreenshotID = a.id
+        let fixture = root.appendingPathComponent("Fixture.png")
+        try CompositionRenderer.encode(image, jpeg: false).write(to: fixture)
+        model.load([fixture, fixture, fixture], asMockups: false)
+        let a = model.screenshots[0], b = model.screenshots[1], c = model.screenshots[2]
+        model.selectedScreenshotID = a.id
         model.settings.headline.enabled = true; model.settings.headline.firstLine = "Alpha"
         model.settings.deviceX = 0.25
         context.clear(CGRect(x: 10, y: 10, width: 80, height: 180))
@@ -92,7 +93,7 @@ struct PerScreenshotChecks {
             precondition(ProjectSettings(migrated.settings) == legacySettings && migrated.selectedMockupID == frameID)
         }
         let migratedProject = try migrated.makeProject()
-        precondition(!migrated.isDirty && migratedProject.version == 3)
+        precondition(!migrated.isDirty && migratedProject.version == 4)
         var invalid = try model.makeProject()
         invalid.layouts!.removeLast()
         let before = reopened.fingerprint
@@ -101,10 +102,11 @@ struct PerScreenshotChecks {
         let sourceURL = root.appendingPathComponent("New screenshot.png")
         try CompositionRenderer.encode(image, jpeg: false).write(to: sourceURL)
         model.selectedScreenshotID = a.id
+        model.useScreenshotAsDefault(a.id)
         let inherited = ProjectSettings(model.settings)
         model.load([sourceURL], asMockups: false)
         precondition(ProjectSettings(model.settings) == inherited && model.selectedMockupID == frameID,
-                     "Imported screenshots must inherit the active layout")
+                     "Imported screenshots must inherit the active device default layout")
         model.settings.deviceX = 0.75
         precondition(model.layout(for: a.id).settings.deviceX == 0.25)
         model.releaseProjectAccess(); reopened.releaseProjectAccess(); migrated.releaseProjectAccess()

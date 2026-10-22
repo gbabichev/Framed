@@ -43,6 +43,7 @@ nonisolated struct DeviceSection: Codable, Equatable, Identifiable, Sendable {
     var name: String? = nil
     var settings: ProjectSettings
     var mockupID: UUID?
+    var styleOverrides: StyleOverrides? = nil
     var title: String {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? device.title : trimmed
@@ -56,10 +57,24 @@ struct DeviceSidebarGroup: Identifiable {
 }
 
 nonisolated enum SidebarSelection: Hashable {
-    case device(UUID), screenshot(UUID)
+    case projectStyle, device(UUID), screenshot(UUID)
 }
 
 nonisolated enum ScreenshotExportScope: String, CaseIterable, Identifiable {
     case selected = "Selected", device = "Device", project = "Project"
     var id: Self { self }
+}
+
+/// A device can override the project; a screenshot can override its device.
+nonisolated struct StyleOverrides: Codable, Equatable, Sendable {
+    var headline = false
+    var effects = false
+    static let all = Self(headline: true, effects: true)
+}
+
+nonisolated enum StyleComponent { case headline, effects }
+
+nonisolated struct ProjectStyle: Codable, Equatable, Sendable {
+    var headline = HeadlineSettings()
+    var effects = CompositionEffects()
 }

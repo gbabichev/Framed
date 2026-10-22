@@ -148,11 +148,13 @@ nonisolated struct ProjectScreenshotLayout: Codable, Equatable, Sendable {
     var sectionID: UUID? = nil
     var mockupID: UUID?
     var settings: ProjectSettings
+    var styleOverrides: StyleOverrides? = nil
 }
 
 nonisolated struct ScreenshotLayout: Sendable {
     var settings: CompositionSettings
     var mockupID: UUID?
+    var styleOverrides = StyleOverrides()
 }
 
 nonisolated struct FramedProject: Codable, Sendable {
@@ -166,6 +168,7 @@ nonisolated struct FramedProject: Codable, Sendable {
     var layouts: [ProjectScreenshotLayout]?
     var deviceSections: [DeviceSection]? = nil
     var selectedDeviceSectionID: UUID? = nil
+    var projectStyle: ProjectStyle? = nil
 
     static func read(from url: URL, progress: (ProjectLoadingProgress) -> Void = { _ in }) throws -> Self {
         let access = url.startAccessingSecurityScopedResource()
@@ -174,7 +177,7 @@ nonisolated struct FramedProject: Codable, Sendable {
         _ = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         let project = isDirectory.boolValue ? try ProjectPackage.read(from: url, progress: progress)
             : try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
-        guard (1...3).contains(project.version) else { throw FramedError.message("This project was created by a newer version of Framed.") }
+        guard (1...4).contains(project.version) else { throw FramedError.message("This project was created by a newer version of Framed.") }
         return project
     }
 
@@ -209,6 +212,7 @@ struct ProjectFingerprint: Equatable {
     var jpeg: Bool
     var deviceSections: [DeviceSection] = []
     var memberships: [UUID: UUID] = [:]
+    var projectStyle = ProjectStyle()
 }
 
 /// Fully prepared away from the UI; publishing it only replaces in-memory state.
@@ -225,6 +229,7 @@ nonisolated struct PreparedProject: Sendable {
     let deviceSections: [DeviceSection]
     let memberships: [UUID: UUID]
     let selectedDeviceSectionID: UUID?
+    let projectStyle: ProjectStyle
 }
 
 /// Counts describe the current stage rather than an estimated overall percentage.
@@ -288,9 +293,14 @@ nonisolated enum ProjectFileWorker {
 
     static func prepare(_ project: FramedProject, progress: (ProjectLoadingProgress) -> Void = { _ in }) throws -> PreparedProject {
         try Task.checkCancellation()
-        guard (1...3).contains(project.version) else { throw FramedError.message("Unsupported project version.") }
+        guard (1...4).contains(project.version) else { throw FramedError.message("Unsupported project version.") }
         // Decode and validate everything before replacing the current canvas.
         let restoredSettings = try project.settings.restored()
+        let sharedStyle = project.version >= 4 ? project.projectStyle : nil
+        guard (project.version < 4 || sharedStyle != nil),
+              sharedStyle.map({ $0.headline.isValid && $0.effects.isValid }) ?? true else {
+            throw FramedError.message("This project contains an invalid project style.")
+        }
         func restore(_ records: [ProjectImage], stage: ProjectLoadingProgress.Stage) throws -> [ImportedImage] {
             try records.enumerated().map { index, record in
                 try Task.checkCancellation()
@@ -319,20 +329,23 @@ nonisolated enum ProjectFileWorker {
                 guard record.mockupID == nil || frames.contains(where: { $0.id == record.mockupID }) else {
                     throw FramedError.message("A screenshot layout refers to a missing frame.")
                 }
-                restoredLayouts[record.screenshotID] = ScreenshotLayout(settings: try record.settings.restored(), mockupID: record.mockupID)
+                restoredLayouts[record.screenshotID] = ScreenshotLayout(settings: try record.settings.restored(), mockupID: record.mockupID, styleOverrides: sharedStyle == nil ? .all : record.styleOverrides ?? .all)
             }
         } else {
             for shot in shots {
-                restoredLayouts[shot.id] = ScreenshotLayout(settings: restoredSettings, mockupID: project.selectedMockupID)
+                restoredLayouts[shot.id] = ScreenshotLayout(settings: restoredSettings, mockupID: project.selectedMockupID, styleOverrides: .all)
             }
         }
         if project.version >= 3 {
             guard let sections = project.deviceSections, let records = project.layouts,
-                  records.allSatisfy({ $0.sectionID != nil }), !sections.isEmpty else {
+                  records.allSatisfy({ $0.sectionID != nil }), (!sections.isEmpty || (project.version >= 4 && shots.isEmpty)) else {
                 throw FramedError.message("This project contains missing device sections.")
             }
         }
         var sections = project.deviceSections ?? []
+        for index in sections.indices {
+            if sharedStyle == nil { sections[index].styleOverrides = .all }
+        }
         var memberships: [UUID: UUID] = [:]
         guard Set(sections.map(\.id)).count == sections.count else {
             throw FramedError.message("This project contains duplicate device sections.")
@@ -380,6 +393,7 @@ nonisolated enum ProjectFileWorker {
                                layouts: restoredLayouts, settings: restoredSettings,
                                selectedScreenshotID: project.selectedDeviceSectionID != nil ? project.selectedScreenshotID : project.selectedScreenshotID ?? shots.first?.id,
                                selectedMockupID: project.selectedMockupID, jpeg: project.jpeg,
-                               deviceSections: sections, memberships: memberships, selectedDeviceSectionID: project.selectedDeviceSectionID)
+                               deviceSections: sections, memberships: memberships, selectedDeviceSectionID: project.selectedDeviceSectionID,
+                               projectStyle: sharedStyle ?? ProjectStyle(headline: restoredSettings.headline.sharedStyle, effects: restoredSettings.effects))
     }
 }

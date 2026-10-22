@@ -52,6 +52,12 @@ Framed includes canvas presets for iPhone, iPad, Mac, Apple Watch, and other App
 - **Fit** keeps the whole screenshot; **Fill** crops it to cover the screen opening.
 - Each screenshot keeps its own layout when you export the whole set.
 
+## Shared styles
+
+Select **Project Style** at the top of the sidebar to set one headline and effects style across your devices. New devices and screenshots follow it automatically. Headline size scales with each canvas, while placement stays local.
+
+Use **Apply to All** to link existing layouts to the project style. To make an exception, turn off **Use Project Style** on a device or **Use Device Style** on a screenshot, separately for Headline and Effects. Turn it back on to follow the shared style again. Existing projects keep their current styles until you choose to link them.
+
 ## Projects and privacy
 
 Screenshots and frames are processed locally. Framed does not upload them to a server.

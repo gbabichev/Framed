@@ -171,6 +171,12 @@ private struct ScreenshotSidebar: View {
 
     var body: some View {
         List(selection: $model.sidebarSelections) {
+            Section("Project") {
+                Label("Project Style", systemImage: "paintbrush.pointed")
+                    .font(.callout)
+                    .tag(SidebarSelection.projectStyle)
+                    .help("Shared headline and effects across devices and screenshots")
+            }
             ForEach(model.sidebarGroups) { group in
                 DeviceSidebarSection(model: model, group: group,
                     requestRemoval: { pendingRemoval = $0 },
@@ -258,7 +264,12 @@ private struct DeviceSidebarSection: View {
 
     var body: some View {
         Section(isExpanded: $expanded) {
-            Label("Default Layout", systemImage: "slider.horizontal.3")
+            Label {
+                Text("Default Layout")
+            } icon: {
+                Image(systemName: "slider.horizontal.3")
+                    .foregroundStyle(.secondary)
+            }
                 .font(.callout)
                 .tag(SidebarSelection.device(group.id))
                 .help("Edit the default layout for new screenshots in this device section")
@@ -289,8 +300,14 @@ private struct DeviceSidebarSection: View {
                 Button {
                     model.selectDeviceSection(group.id)
                 } label: {
-                    Label(group.section.title, systemImage: group.section.device.symbol)
-                        .font(.system(size: 15, weight: .semibold))
+                    Label {
+                        Text(group.section.title)
+                            .font(.system(size: 15, weight: .semibold))
+                    } icon: {
+                        Image(systemName: group.section.device.symbol)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .help(group.section.title)
@@ -301,10 +318,17 @@ private struct DeviceSidebarSection: View {
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(.quaternary.opacity(0.5), in: Capsule())
             }
-            .padding(.vertical, 5)
+            .padding(.vertical, 8)
+            .overlay(alignment: .bottom) {
+                Color(nsColor: .separatorColor)
+                    .opacity(0.5)
+                    .frame(height: 1)
+                    .allowsHitTesting(false)
+            }
             .contextMenu {
                 Button("Edit Default Layout") { model.selectDeviceSection(group.id) }
                 Button("Rename…") { requestRename(group.section) }
@@ -920,26 +944,52 @@ private struct InspectorPane: View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 18) {
-                    if model.selectedScreenshot == nil, let section = model.activeSection {
-                        DeviceDefaultLayoutActions(model: model, section: section,
-                                                   screenshotCount: model.screenshotsForExport(.device).count)
-                            .id(section.id)
+                    if model.isEditingProjectStyle {
+                        InspectorCard("Project Style", systemImage: "paintbrush.pointed") {
+                            HStack {
+                                Button("Apply to All") { model.applyProjectStyleToAll() }
+                                    .help("Link headline and effects for every device and screenshot. Frames, canvases, appearance, and headline positions stay unchanged. This can be undone.")
+                                Spacer()
+                                InspectorInfo(text: "Shared headline content, typography, and effects. Linked devices and screenshots update immediately. Headline size scales with each canvas; position stays local.")
+                            }
+                        }
+                        InspectorCard("Headline", systemImage: "textformat") {
+                            HeadlineSettingsView(settings: $model.projectStyleSettings, showsPosition: false)
+                        }
+                        InspectorCard("Effects", systemImage: "sparkles") {
+                            EffectsSettings(effects: $model.projectStyleSettings.effects)
+                        }
+                    } else {
+                        if model.selectedScreenshot == nil, let section = model.activeSection {
+                            DeviceDefaultLayoutActions(model: model, section: section,
+                                                       screenshotCount: model.screenshotsForExport(.device).count)
+                                .id(section.id)
+                        }
+                        InspectorCard("Device & Canvas", systemImage: "iphone") {
+                            MockupSettings(model: model)
+                            Divider()
+                            OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
+                        }
+                        InspectorCard("Appearance", systemImage: "paintpalette") {
+                            LayoutSettings(settings: $model.settings)
+                        }
+                        InspectorCard("Headline", systemImage: "textformat") {
+                            if model.activeSection != nil {
+                                StyleInheritanceControl(model: model, component: .headline)
+                                Divider()
+                            }
+                            HeadlineSettingsView(settings: $model.settings, styleEditable: model.activeSection == nil || !model.followsParentStyle(.headline))
+                        }
+                        InspectorCard("Effects", systemImage: "sparkles") {
+                            if model.activeSection != nil {
+                                StyleInheritanceControl(model: model, component: .effects)
+                                Divider()
+                            }
+                            EffectsSettings(effects: $model.settings.effects)
+                                .disabled(model.activeSection != nil && model.followsParentStyle(.effects))
+                        }
                     }
-                    InspectorCard("Device & Canvas", systemImage: "iphone") {
-                        MockupSettings(model: model)
-                        Divider()
-                        OutputSettings(settings: $model.settings, suggestion: model.suggestedCanvas)
-                    }
-                    InspectorCard("Appearance", systemImage: "paintpalette") {
-                        LayoutSettings(settings: $model.settings)
-                    }
-                    InspectorCard("Headline", systemImage: "textformat") {
-                        HeadlineSettingsView(settings: $model.settings)
-                    }
-                    InspectorCard("Effects", systemImage: "sparkles") {
-                        EffectsSettings(effects: $model.settings.effects)
-                    }
-                    if !model.warnings.isEmpty {
+                    if !model.warnings.isEmpty && !model.isEditingProjectStyle {
                         InspectorCard("Checks", systemImage: "exclamationmark.triangle") {
                             ForEach(model.warnings, id: \.self) { warning in
                                 Text(warning).font(.caption).foregroundStyle(.orange)
@@ -954,6 +1004,18 @@ private struct InspectorPane: View {
         }
         .controlSize(.small)
         .background(.background)
+    }
+}
+
+private struct StyleInheritanceControl: View {
+    let model: EditorModel
+    let component: StyleComponent
+
+    var body: some View {
+        InspectorSwitch("Use \(model.parentStyleName)", isOn: Binding(
+            get: { model.followsParentStyle(component) },
+            set: { model.setFollowsParentStyle($0, component: component) }),
+            info: "Turn off to customize this card. Turn on to follow the shared style again.")
     }
 }
 
@@ -1379,68 +1441,76 @@ private enum HeadlineFontCatalog {
 private struct HeadlineSettingsView: View {
     @Environment(EditorModel.self) private var editor
     @Binding var settings: CompositionSettings
+    var showsPosition = true
+    var styleEditable = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Show headline").font(.subheadline.weight(.semibold))
-                    Spacer()
-                    InspectorInfo(text: "Add up to two lines of text. Drag the headline in the preview to move it. Reduce device scale to leave more room above the device.")
-                }
-                HStack {
-                    Toggle("Show headline", isOn: $settings.showHeadline)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.regular)
-                    Spacer()
-                    if settings.headline.enabled {
-                        ColorPicker("Headline color", selection: $settings.headline.pickerColor, supportsOpacity: false)
-                            .labelsHidden()
-                            .help("Headline text color")
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Show headline").font(.subheadline.weight(.semibold))
+                        Spacer()
+                        InspectorInfo(text: "Add up to two lines of text. Drag the headline in the preview to move it. Reduce device scale to leave more room above the device.")
                     }
+                    HStack {
+                        Toggle("Show headline", isOn: $settings.showHeadline)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.regular)
+                        Spacer()
+                        if settings.headline.enabled {
+                            ColorPicker("Headline color", selection: $settings.headline.pickerColor, supportsOpacity: false)
+                                .labelsHidden()
+                                .help("Headline text color")
+                        }
+                    }
+                }
+                if settings.headline.enabled {
+                    TextField("First line", text: $settings.headline.firstLineInput)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Subheadline (optional)", text: $settings.headline.secondLineInput)
+                        .textFieldStyle(.roundedBorder)
+                        .help("Subheadline text is always 75% of the main headline size.")
+                    Divider()
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
+                        GridRow {
+                            Text("Font").font(.subheadline.weight(.semibold))
+                            Picker("Font", selection: $settings.headline.fontFamily) {
+                                Text("System").tag("")
+                                ForEach(HeadlineFontCatalog.families, id: \.self) { Text($0).tag($0) }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity)
+                        }
+                        GridRow {
+                            Text("Weight").font(.subheadline.weight(.semibold))
+                            Picker("Weight", selection: $settings.headline.weight) {
+                                ForEach(HeadlineWeight.allCases) { Text($0.title).tag($0) }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity)
+                        }
+                        GridRow {
+                            Text("Size").font(.subheadline.weight(.semibold))
+                            HStack(spacing: 6) {
+                                TextField("Font size in pixels", value: $settings.headlineFontSize,
+                                          format: .number.precision(.fractionLength(0)))
+                                    .textFieldStyle(.roundedBorder)
+                                    .monospacedDigit()
+                                Text("px").font(.caption).foregroundStyle(.secondary)
+                                Stepper("Font size in pixels", value: $settings.headlineFontSize,
+                                        in: settings.outputSize.width * 0.01...settings.outputSize.width * 0.15, step: 1)
+                                    .labelsHidden()
+                            }
+                            .help("Text size in export pixels. Scales proportionally when the canvas size changes.")
+                        }
+                    }
+
                 }
             }
-            if settings.headline.enabled {
-                TextField("First line", text: $settings.headline.firstLineInput)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Subheadline (optional)", text: $settings.headline.secondLineInput)
-                    .textFieldStyle(.roundedBorder)
-                    .help("Subheadline text is always 75% of the main headline size.")
-                Divider()
-                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
-                    GridRow {
-                        Text("Font").font(.subheadline.weight(.semibold))
-                        Picker("Font", selection: $settings.headline.fontFamily) {
-                            Text("System").tag("")
-                            ForEach(HeadlineFontCatalog.families, id: \.self) { Text($0).tag($0) }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity)
-                    }
-                    GridRow {
-                        Text("Weight").font(.subheadline.weight(.semibold))
-                        Picker("Weight", selection: $settings.headline.weight) {
-                            ForEach(HeadlineWeight.allCases) { Text($0.title).tag($0) }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity)
-                    }
-                    GridRow {
-                        Text("Size").font(.subheadline.weight(.semibold))
-                        HStack(spacing: 6) {
-                            TextField("Font size in pixels", value: $settings.headlineFontSize,
-                                      format: .number.precision(.fractionLength(0)))
-                                .textFieldStyle(.roundedBorder)
-                                .monospacedDigit()
-                            Text("px").font(.caption).foregroundStyle(.secondary)
-                            Stepper("Font size in pixels", value: $settings.headlineFontSize,
-                                    in: settings.outputSize.width * 0.01...settings.outputSize.width * 0.15, step: 1)
-                                .labelsHidden()
-                        }
-                        .help("Text size in export pixels. Scales proportionally when the canvas size changes.")
-                    }
-                }
+            .disabled(!styleEditable)
+            if showsPosition && settings.headline.enabled {
                 Divider()
                 HStack {
                     Text("Headline position").font(.subheadline.weight(.semibold))

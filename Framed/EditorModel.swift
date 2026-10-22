@@ -22,6 +22,7 @@ final class EditorModel {
     private(set) var deviceSections: [DeviceSection] = []
     private var memberships: [UUID: UUID] = [:]
     var selectedDeviceSectionID: UUID?
+    private var projectStyle = ProjectStyle()
     private var emptySettings = CompositionSettings()
     private var emptyMockupID: UUID?
     private struct CopiedStyle {
@@ -33,14 +34,23 @@ final class EditorModel {
     private var copiedStyle: CopiedStyle?
     private var effectiveScreenshotID: UUID? { selectedScreenshotID ?? (selectedDeviceSectionID == nil ? screenshots.first?.id : nil) }
     var settings: CompositionSettings {
-        get { effectiveScreenshotID.map { layout(for: $0).settings } ?? activeSection.flatMap { try? $0.settings.restored() } ?? emptySettings }
+        get { effectiveScreenshotID.map { layout(for: $0).settings } ?? activeSection.map { resolvedSettings(for: $0) } ?? applyingProjectStyle(to: emptySettings, overrides: StyleOverrides()) }
         set {
             guard ProjectSettings(settings) != ProjectSettings(newValue) else { return }
             recordEdit("Edit Layout", coalescing: settingsCoalescingKey(from: settings, to: newValue))
             if let id = effectiveScreenshotID {
-                var layout = layout(for: id); layout.settings = newValue; layouts[id] = layout
-            } else if let index = activeSectionIndex { deviceSections[index].settings = ProjectSettings(newValue) }
-            else { emptySettings = newValue }
+                var layout = layout(for: id)
+                layout.styleOverrides = updatedOverrides(layout.styleOverrides, from: layout.settings, to: newValue)
+                layout.settings = newValue; layouts[id] = layout
+            } else if let index = activeSectionIndex {
+                deviceSections[index].styleOverrides = updatedOverrides(deviceSections[index].styleOverrides ?? .all, from: settings, to: newValue)
+                deviceSections[index].settings = ProjectSettings(newValue)
+            }
+            else {
+                emptySettings = newValue
+                projectStyle.headline = newValue.headline.sharedStyle
+                projectStyle.effects = newValue.effects
+            }
         }
     }
     var selectedMockupID: UUID? {
@@ -59,8 +69,88 @@ final class EditorModel {
         }
     }
     func layout(for id: UUID) -> ScreenshotLayout {
-        layouts[id] ?? ScreenshotLayout(settings: emptySettings, mockupID: emptyMockupID)
+        var layout = layouts[id] ?? ScreenshotLayout(settings: emptySettings, mockupID: emptyMockupID)
+        let parent = memberships[id].flatMap { sectionID in deviceSections.first { $0.id == sectionID } }
+            .map { resolvedSettings(for: $0) } ?? applyingProjectStyle(to: emptySettings, overrides: StyleOverrides())
+        if !layout.styleOverrides.headline { layout.settings.headline = parent.headline.positioned(like: layout.settings.headline) }
+        if !layout.styleOverrides.effects { layout.settings.effects = parent.effects }
+        return layout
     }
+    var isEditingProjectStyle: Bool { selectedSidebarItems.contains(.projectStyle) }
+
+    func selectProjectStyle() {
+        selectedSidebarItems = [.projectStyle]
+        lastCoalescingKey = nil
+    }
+
+    var projectStyleSettings: CompositionSettings {
+        get {
+            var value = settings
+            value.headline = projectStyle.headline
+            value.effects = projectStyle.effects
+            return value
+        }
+        set {
+            let style = ProjectStyle(headline: newValue.headline.sharedStyle, effects: newValue.effects)
+            guard style != projectStyle else { return }
+            recordEdit("Edit Project Style", coalescing: settingsCoalescingKey(from: projectStyleSettings, to: newValue))
+            projectStyle = style
+        }
+    }
+
+    private func applyingProjectStyle(to settings: CompositionSettings, overrides: StyleOverrides) -> CompositionSettings {
+        var value = settings
+        if !overrides.headline { value.headline = projectStyle.headline.positioned(like: value.headline) }
+        if !overrides.effects { value.effects = projectStyle.effects }
+        return value
+    }
+
+    private func resolvedSettings(for section: DeviceSection) -> CompositionSettings {
+        applyingProjectStyle(to: (try? section.settings.restored()) ?? emptySettings, overrides: section.styleOverrides ?? .all)
+    }
+
+    private func updatedOverrides(_ overrides: StyleOverrides, from old: CompositionSettings, to new: CompositionSettings) -> StyleOverrides {
+        var overrides = overrides
+        if old.headline.sharedStyle != new.headline.sharedStyle { overrides.headline = true }
+        if old.effects != new.effects { overrides.effects = true }
+        return overrides
+    }
+
+    func followsParentStyle(_ component: StyleComponent) -> Bool {
+        let overrides = effectiveScreenshotID.map { layout(for: $0).styleOverrides } ?? activeSection?.styleOverrides ?? StyleOverrides()
+        return component == .headline ? !overrides.headline : !overrides.effects
+    }
+
+    var parentStyleName: String { effectiveScreenshotID == nil ? "Project Style" : "Device Style" }
+
+    func setFollowsParentStyle(_ follows: Bool, component: StyleComponent) {
+        guard follows != followsParentStyle(component) else { return }
+        beginEditing(follows ? "Follow Parent Style" : "Customize Style")
+        defer { endEditing() }
+        if let id = effectiveScreenshotID {
+            var layout = layout(for: id)
+            if component == .headline { layout.styleOverrides.headline = !follows }
+            else { layout.styleOverrides.effects = !follows }
+            layouts[id] = layout
+        } else if let index = activeSectionIndex {
+            let resolved = resolvedSettings(for: deviceSections[index])
+            deviceSections[index].settings = ProjectSettings(resolved)
+            var overrides = deviceSections[index].styleOverrides ?? .all
+            if component == .headline { overrides.headline = !follows }
+            else { overrides.effects = !follows }
+            deviceSections[index].styleOverrides = overrides
+        }
+    }
+
+    func applyProjectStyleToAll() {
+        beginEditing("Apply Project Style to All")
+        defer { endEditing() }
+        for index in deviceSections.indices { deviceSections[index].styleOverrides = StyleOverrides() }
+        for id in screenshots.map(\.id) {
+            if var layout = layouts[id] { layout.styleOverrides = StyleOverrides(); layouts[id] = layout }
+        }
+    }
+
     private var activeSectionIndex: Int? {
         let id = selectedScreenshotID.flatMap { memberships[$0] } ?? selectedDeviceSectionID
         return deviceSections.firstIndex { $0.id == id }
@@ -74,6 +164,7 @@ final class EditorModel {
                 return nil
             })
             if validShots.isEmpty {
+                if newValue.contains(.projectStyle) { selectProjectStyle(); return }
                 if let device = newValue.first(where: { if case .device = $0 { return true }; return false }),
                    case .device(let id) = device { selectDeviceSection(id) }
                 else { selectedSidebarItems = []; selectedScreenshotID = nil }
@@ -98,7 +189,7 @@ final class EditorModel {
     // Used by DeviceSectionChecks outside the Xcode app target.
     // periphery:ignore
     var sidebarSelection: SidebarSelection? {
-        get { selectedScreenshotID.map(SidebarSelection.screenshot) ?? selectedDeviceSectionID.map(SidebarSelection.device) }
+        get { isEditingProjectStyle ? .projectStyle : selectedScreenshotID.map(SidebarSelection.screenshot) ?? selectedDeviceSectionID.map(SidebarSelection.device) }
         set { sidebarSelections = newValue.map { [$0] } ?? [] }
     }
     private var sidebarOrderedScreenshots: [ImportedImage] {
@@ -130,7 +221,7 @@ final class EditorModel {
     func addDeviceSection(_ device: ProjectDevice) {
         beginEditing("Add Device")
         defer { endEditing() }
-        let section = DeviceSection(device: device, name: uniqueSectionName(device.title), settings: ProjectSettings(device.defaultSettings))
+        let section = DeviceSection(device: device, name: uniqueSectionName(device.title), settings: ProjectSettings(device.defaultSettings), styleOverrides: StyleOverrides())
         deviceSections.append(section); selectDeviceSection(section.id)
     }
     private func uniqueSectionName(_ base: String, excluding id: UUID? = nil) -> String {
@@ -184,10 +275,12 @@ final class EditorModel {
         defer { endEditing() }
         let layout = layout(for: id)
         deviceSections[index].settings = ProjectSettings(layout.settings)
+        deviceSections[index].styleOverrides = .all
         deviceSections[index].mockupID = layout.mockupID
     }
     func applyDeviceLayout(_ id: UUID) {
-        guard let section = deviceSections.first(where: { $0.id == id }), let settings = try? section.settings.restored() else { return }
+        guard let section = deviceSections.first(where: { $0.id == id }) else { return }
+        let settings = resolvedSettings(for: section)
         beginEditing("Apply Device Layout")
         defer { endEditing() }
         let style = ScreenshotLayout(settings: settings, mockupID: section.mockupID)
@@ -225,6 +318,7 @@ final class EditorModel {
             switch item {
             case .screenshot(let id): return screenshots.contains { $0.id == id }
             case .device(let id): return deviceSections.contains { $0.id == id }
+            case .projectStyle: return true
             }
         }
         if !remaining.isEmpty { sidebarSelections = remaining }
@@ -235,8 +329,9 @@ final class EditorModel {
     }
     private var projectLayouts: [ProjectScreenshotLayout] {
         screenshots.map { shot in
-            let layout = layout(for: shot.id)
-            return ProjectScreenshotLayout(screenshotID: shot.id, sectionID: memberships[shot.id], mockupID: layout.mockupID, settings: ProjectSettings(layout.settings))
+            let layout = layouts[shot.id] ?? layout(for: shot.id)
+            return ProjectScreenshotLayout(screenshotID: shot.id, sectionID: memberships[shot.id], mockupID: layout.mockupID,
+                                           settings: ProjectSettings(layout.settings), styleOverrides: layout.styleOverrides)
         }
     }
     var jpeg = false { willSet { if newValue != jpeg { recordEdit("Change Export Format") } } }
@@ -386,6 +481,7 @@ final class EditorModel {
         let mockups: [ImportedImage]
         let layouts: [UUID: ScreenshotLayout]
         let emptySettings: CompositionSettings
+        let projectStyle: ProjectStyle
         let emptyMockupID: UUID?
         let selectedScreenshotID: UUID?
         let jpeg: Bool
@@ -418,7 +514,7 @@ final class EditorModel {
 
     private func editSnapshot() -> EditSnapshot {
         EditSnapshot(screenshots: screenshots, mockups: mockups, layouts: layouts,
-                     emptySettings: emptySettings, emptyMockupID: emptyMockupID,
+                     emptySettings: emptySettings, projectStyle: projectStyle, emptyMockupID: emptyMockupID,
                      selectedScreenshotID: selectedScreenshotID, jpeg: jpeg,
                      openings: openings, libraryIDs: libraryIDs, deviceSections: deviceSections, memberships: memberships,
                      selectedDeviceSectionID: selectedDeviceSectionID, sidebarItems: selectedSidebarItems, fingerprint: fingerprint)
@@ -467,6 +563,7 @@ final class EditorModel {
         screenshots = snapshot.screenshots; mockups = snapshot.mockups; layouts = snapshot.layouts
         deviceSections = snapshot.deviceSections; memberships = snapshot.memberships
         selectedDeviceSectionID = snapshot.selectedDeviceSectionID
+        projectStyle = snapshot.projectStyle
         emptySettings = snapshot.emptySettings; emptyMockupID = snapshot.emptyMockupID
         selectedScreenshotID = snapshot.selectedScreenshotID; selectedSidebarItems = snapshot.sidebarItems
         jpeg = snapshot.jpeg; openings = snapshot.openings
@@ -517,16 +614,16 @@ final class EditorModel {
         ProjectFingerprint(screenshots: screenshots.map(\.id), mockups: mockups.map(\.id),
                            layouts: projectLayouts, emptySettings: screenshots.isEmpty ? ProjectSettings(emptySettings) : nil,
                            emptyMockupID: screenshots.isEmpty ? emptyMockupID : nil, jpeg: jpeg,
-                           deviceSections: deviceSections, memberships: memberships)
+                           deviceSections: deviceSections, memberships: memberships, projectStyle: projectStyle)
     }
     var isDirty: Bool { fingerprint != savedFingerprint }
 
     private func projectSaveSnapshot() -> ProjectSaveSnapshot {
-        let metadata = FramedProject(version: deviceSections.isEmpty ? 2 : 3, screenshots: [], mockups: [],
+        let metadata = FramedProject(version: 4, screenshots: [], mockups: [],
                                      selectedScreenshotID: selectedScreenshotID, selectedMockupID: selectedMockupID,
-                                     settings: ProjectSettings(settings), jpeg: jpeg, layouts: projectLayouts,
-                                     deviceSections: deviceSections.isEmpty ? nil : deviceSections,
-                                     selectedDeviceSectionID: selectedScreenshotID == nil ? selectedDeviceSectionID : nil)
+                                     settings: ProjectSettings(screenshots.isEmpty ? emptySettings : settings), jpeg: jpeg, layouts: projectLayouts,
+                                     deviceSections: deviceSections,
+                                     selectedDeviceSectionID: selectedScreenshotID == nil ? selectedDeviceSectionID : nil, projectStyle: projectStyle)
         return ProjectSaveSnapshot(metadata: metadata, screenshots: screenshots, mockups: mockups)
     }
 
@@ -548,6 +645,7 @@ final class EditorModel {
         defer { isRestoringHistory = false; historyRevision += 1 }
         screenshots = project.screenshots; mockups = project.mockups; openings = project.openings
         layouts = project.layouts; copiedStyle = nil
+        projectStyle = project.projectStyle
         deviceSections = project.deviceSections; memberships = project.memberships
         selectedDeviceSectionID = project.selectedDeviceSectionID
         emptySettings = project.settings; emptyMockupID = project.selectedMockupID
@@ -847,13 +945,13 @@ final class EditorModel {
                         let matching = ScreenshotPreset.all.first { ($0.width == imported.image.width && $0.height == imported.image.height)
                             || ($0.width == imported.image.height && $0.height == imported.image.width) }
                         let device = ProjectDevice.detect(selectedMockup == nil ? (matching?.name ?? settings.preset.name) : settings.preset.name)
-                        let section = DeviceSection(device: device, settings: ProjectSettings(settings), mockupID: selectedMockupID)
+                        let section = DeviceSection(device: device, settings: ProjectSettings(settings), mockupID: selectedMockupID, styleOverrides: StyleOverrides())
                         deviceSections.append(section); destination = section.id
                     }
                     guard let section = deviceSections.first(where: { $0.id == destination }) else {
                         throw FramedError.message("The destination device section no longer exists.")
                     }
-                    let inherited = ScreenshotLayout(settings: try section.settings.restored(), mockupID: section.mockupID)
+                    let inherited = ScreenshotLayout(settings: resolvedSettings(for: section), mockupID: section.mockupID)
                     memberships[imported.id] = section.id
                     screenshots.append(imported)
                     layouts[imported.id] = inherited
@@ -1035,9 +1133,11 @@ final class EditorModel {
     }
     private func applyStyle(_ style: ScreenshotLayout, to id: UUID) {
         var result = style
-        let text = layout(for: id).settings.headline
+        let target = layout(for: id)
+        let text = target.settings.headline
         result.settings.headline.firstLine = text.firstLine
         result.settings.headline.secondLine = text.secondLine
+        result.styleOverrides = updatedOverrides(target.styleOverrides, from: target.settings, to: result.settings)
         layouts[id] = result
     }
 

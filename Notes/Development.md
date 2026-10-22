@@ -269,7 +269,7 @@ xcrun swiftc -default-isolation MainActor -swift-version 5 Framed/SidebarFocusRe
 
 ## Document package storage
 
-New saves use a Finder document package with `project.json`, `Screenshots/`, and `Frames/`. The manifest has package format/version fields and project metadata (layout schema version 2 or 3). Image records store relative asset references and original filenames; they do not embed Base64 bytes. `ProjectImage.png` remains the in-memory/legacy JSON field name, but can contain original JPEG, PNG, HEIC, or TIFF data. Imported images retain immutable source bytes alongside their decoded CGImage; frame-library imports, prepared frames, screenshot duplication, and reopened projects retain those bytes and filenames. ImageIO applies source orientation consistently on both import and reopen.
+New saves use a Finder document package with `project.json`, `Screenshots/`, and `Frames/`. The manifest has package format/version fields and project metadata (layout schema version 2, 3, or 4). Image records store relative asset references and original filenames; they do not embed Base64 bytes. `ProjectImage.png` remains the in-memory/legacy JSON field name, but can contain original JPEG, PNG, HEIC, or TIFF data. Imported images retain immutable source bytes alongside their decoded CGImage; frame-library imports, prepared frames, screenshot duplication, and reopened projects retain those bytes and filenames. ImageIO applies source orientation consistently on both import and reopen.
 
 Asset filenames include a content digest, a readable source stem, and the detected format extension. Duplicate content shares one asset per category. Reading validates paths, regular files, checksums, image dimensions, and project references. Legacy flat JSON versions 1–3 still open; their already-converted PNGs cannot recover the original JPEG bytes without reimporting the originals.
 
@@ -284,3 +284,9 @@ Project opening reports ordered per-image progress for package asset reads, scre
 ## Unused-code checks
 
 Run `periphery scan` from the repository root. `.periphery.yml` selects the app scheme and retains properties read by synthesized Equatable comparisons (including thumbnail task keys and project dirty-state fingerprints). The standalone `Tests/*Checks.swift` executables are not Xcode test targets, so their explicitly documented entry points have narrowly scoped `periphery:ignore` comments. Review those references before removing a retained helper; no source files or runtime callbacks are broadly excluded from scanning.
+
+## Project Style
+
+The sidebar’s Project Style row edits shared headline content/typography and effects. Headline x/y are excluded from sharing. Resolution follows project → device → screenshot, with separate headline/effects override flags. New imports and devices inherit; editing a shared field locally creates the corresponding override, while position/canvas/appearance edits do not. Per-card checkboxes reconnect to the parent style, and Apply to All clears both override flags throughout the project as one undoable edit. Copy/paste only creates overrides for shared values that actually change.
+
+Layout schema 4 stores ProjectStyle and per-device/per-screenshot StyleOverrides. Raw local layouts and links are saved; preview, thumbnails, and exports use resolved layouts. The global style and links participate in undo snapshots and dirty fingerprints. Versions 1–3 migrate as local customizations to preserve their existing output; Apply to All opts them into live sharing. Empty template-only projects can save before importing anything. `Tests/ProjectStyleChecks.swift` covers inheritance, exceptions, positions, moves, undo/redo, persistence, migration and template-only projects.
