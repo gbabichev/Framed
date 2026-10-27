@@ -30,7 +30,8 @@ nonisolated struct ImportedImage: Identifiable, Equatable, Sendable {
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: max(width, height)
+                kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+                kCGImageSourceShouldCacheImmediately: true
               ] as CFDictionary) else {
             throw FramedError.message("Could not read \(url.lastPathComponent). Use an image up to 60 megapixels and 16,000 pixels per side.")
         }
@@ -39,6 +40,29 @@ nonisolated struct ImportedImage: Identifiable, Equatable, Sendable {
         self.image = image
         self.sourceData = data
         self.sourceFilename = url.lastPathComponent
+    }
+}
+
+nonisolated struct ScreenshotImportBatch: Sendable {
+    var images: [ImportedImage] = []
+    var failures: [String] = []
+}
+
+nonisolated enum ScreenshotImportWorker {
+    @concurrent
+    static func read(_ urls: [URL]) async throws -> ScreenshotImportBatch {
+        assert(!Thread.isMainThread, "Screenshot decoding must stay off the UI thread")
+        var batch = ScreenshotImportBatch()
+        for url in urls {
+            try Task.checkCancellation()
+            do {
+                let image = try autoreleasepool { try ImportedImage(url: url) }
+                batch.images.append(image)
+            } catch {
+                batch.failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        return batch
     }
 }
 

@@ -7,12 +7,10 @@
 Framed turns screenshots from your device or simulator into finished images for the App Store. Add a device frame, choose a background, write a headline, and export your screenshots at the size you need. Everything happens locally on your Mac.
 
 <p align="center">
-  <img src="./docs/images/editor-placeholder.svg" alt="Placeholder for a screenshot of the Framed canvas editor" width="32%">
-  <img src="./docs/images/library-placeholder.svg" alt="Placeholder for a screenshot of the Frame Library" width="32%">
-  <img src="./docs/images/export-placeholder.svg" alt="Placeholder for a screenshot of the export settings" width="32%">
+  <img src="./docs/images/screen1.png" alt="Framed canvas editor" width="32%">
+  <img src="./docs/images/screen2.png" alt="Frame Library" width="32%">
+  <img src="./docs/images/screen3.png" alt="Screenshot export settings" width="32%">
 </p>
-
-*App screenshots coming soon.*
 
 ## Features
 

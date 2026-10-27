@@ -760,20 +760,19 @@ private struct DeviceDragOverlay: View {
     let mockup: CGImage?
     @Binding var settings: CompositionSettings
     @State private var dragOrigin: CGPoint?
-    @State private var hovering = false
+    @GestureState private var isDragging = false
 
     var body: some View {
         GeometryReader { geometry in
             let rect = CompositionRenderer.foregroundRect(screenshot: screenshot, mockup: mockup,
                                                            canvas: geometry.size, settings: settings)
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(.blue.opacity(hovering || dragOrigin != nil ? 0.7 : 0),
+                .strokeBorder(.blue.opacity(isDragging ? 0.8 : 0),
                               style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .contentShape(Rectangle())
                 .frame(width: rect.width, height: rect.height)
-                .position(x: rect.midX, y: geometry.size.height - rect.midY)
-                .onHover { hovering = $0 }
-                .gesture(DragGesture(minimumDistance: 1)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .named("deviceDragCanvas"))
+                    .updating($isDragging) { _, dragging, _ in dragging = true }
                     .onChanged { value in
                         if dragOrigin == nil {
                             editor.beginEditing("Move Device")
@@ -785,12 +784,21 @@ private struct DeviceDragOverlay: View {
                         let snapped = CenterSnapping.position(candidate, canvas: geometry.size, enabled: snapToCenter)
                         settings.deviceX = snapped.x; settings.deviceY = snapped.y
                     }
-                    .onEnded { _ in dragOrigin = nil; editor.endEditing() })
+                    .onEnded { _ in finishDrag() })
                 .help("Drag to move the device and screenshot together")
                 .accessibilityLabel("Drag to move the device; reset to center is available in Appearance")
+                .position(x: rect.midX, y: geometry.size.height - rect.midY)
         }
+        .coordinateSpace(name: "deviceDragCanvas")
         .clipped()
-        .onDisappear { if dragOrigin != nil { dragOrigin = nil; editor.endEditing() } }
+        .onChange(of: isDragging) { _, dragging in if !dragging { finishDrag() } }
+        .onDisappear { finishDrag() }
+    }
+
+    private func finishDrag() {
+        guard dragOrigin != nil else { return }
+        dragOrigin = nil
+        editor.endEditing()
     }
 }
 
@@ -799,19 +807,18 @@ private struct HeadlineDragOverlay: View {
     @AppStorage(EditorPreferences.centerSnapping) private var snapToCenter = true
     @Binding var headline: HeadlineSettings
     @State private var dragOrigin: CGPoint?
-    @State private var hovering = false
+    @GestureState private var isDragging = false
 
     var body: some View {
         GeometryReader { geometry in
             if let layout = HeadlineRenderer.layout(headline, canvas: geometry.size) {
                 RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(.blue.opacity(hovering || dragOrigin != nil ? 0.9 : 0.25),
+                    .strokeBorder(.blue.opacity(isDragging ? 0.8 : 0),
                                   style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .contentShape(Rectangle())
                     .frame(width: layout.rect.width + 12, height: layout.rect.height + 12)
-                    .position(x: layout.rect.midX, y: layout.rect.midY)
-                    .onHover { hovering = $0 }
-                    .gesture(DragGesture(minimumDistance: 1)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .named("headlineDragCanvas"))
+                        .updating($isDragging) { _, dragging, _ in dragging = true }
                         .onChanged { value in
                             if dragOrigin == nil {
                                 editor.beginEditing("Move Headline")
@@ -824,12 +831,22 @@ private struct HeadlineDragOverlay: View {
                             let snapped = CenterSnapping.position(candidate, canvas: geometry.size, enabled: snapToCenter)
                             headline.x = snapped.x; headline.y = snapped.y
                         }
-                        .onEnded { _ in dragOrigin = nil; editor.endEditing() })
+                        .onEnded { _ in finishDrag() })
                     .help("Drag to move the headline")
                     .accessibilityLabel("Drag to move the headline; reset position is available in the inspector")
+                    .position(x: layout.rect.midX, y: layout.rect.midY)
             }
         }
-        .onDisappear { if dragOrigin != nil { dragOrigin = nil; editor.endEditing() } }
+        .coordinateSpace(name: "headlineDragCanvas")
+        .clipped()
+        .onChange(of: isDragging) { _, dragging in if !dragging { finishDrag() } }
+        .onDisappear { finishDrag() }
+    }
+
+    private func finishDrag() {
+        guard dragOrigin != nil else { return }
+        dragOrigin = nil
+        editor.endEditing()
     }
 }
 

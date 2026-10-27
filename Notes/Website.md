@@ -1,6 +1,6 @@
 # Website maintenance
 
-The user-facing website is a static page in `docs/`, following the structure and visual style of Code’s site. It has no build step, JavaScript dependencies, analytics, external fonts, or bundled Apple artwork. No hosting or release URL has been configured or published by this change.
+The user-facing website is a static page in `docs/`, using the cool blue/slate palette and system typography of JustDew’s site. It has no build step, JavaScript dependencies, analytics, external fonts, or bundled Apple artwork. No hosting or release URL has been configured or published by this change.
 
 ## Files
 
@@ -8,17 +8,15 @@ The user-facing website is a static page in `docs/`, following the structure and
 - `docs/styles.css`: responsive layout, colors, and system light/dark appearance.
 - `docs/images/`: screenshot assets shared with the user-facing README.
 
-## Replace the screenshot placeholders
+## Screenshot assets
 
-| Placeholder | Intended screenshot |
+| Asset | Screenshot |
 | --- | --- |
-| `editor-placeholder.svg` | Main canvas and inspector, preferably with a headline |
-| `library-placeholder.svg` | Frame Library with previews and device filters |
-| `export-placeholder.svg` | Export settings and the composed preview |
+| `screen1.png` | Canvas editor with a MacBook frame, headline, and inspector |
+| `screen2.png` | Frame Library with previews and device filters |
+| `screen3.png` | Export settings and composed preview |
 
-Put the final PNG, JPEG, or WebP files in `docs/images/`. Update their three image paths and alt text in **both** `docs/index.html` and `README.md`. Set each HTML image’s `width` and `height` to its real dimensions; CSS preserves the image’s proportions. Remove the README’s “App screenshots coming soon” line and the placeholder comment in the HTML.
-
-The current SVGs are intentionally square stand-ins, not app screenshots. They contain no device artwork and should be replaced with images you choose to publish. Do not copy screenshots containing private projects, mail, or other personal content from local testing into the public site.
+These images are shared by `docs/index.html` and `README.md`. To replace one, update both references and their alt text. Set each website image’s `width` and `height` to its real dimensions; CSS preserves the image’s proportions. The original placeholder SVGs have been removed.
 
 ## Preview locally
 

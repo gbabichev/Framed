@@ -870,7 +870,7 @@ final class EditorModel {
         if importingMockups {
             startFrameImport(panel.urls, completion: completion)
         } else {
-            load(panel.urls, asMockups: false)
+            startScreenshotImport(panel.urls, completion: completion)
         }
     }
 
@@ -925,20 +925,57 @@ final class EditorModel {
                 error = "Couldn’t read the dropped files. Try adding them with Import screenshots."
                 return
             }
-            load(urls, asMockups: false, sectionID: destination)
+            startScreenshotImport(urls, sectionID: destination)
         }
         return true
     }
 
+    func startScreenshotImport(_ urls: [URL], sectionID: UUID? = nil, completion: @escaping (UUID?) -> Void = { _ in }) {
+        guard !urls.isEmpty, !isBusy, !isPresentingProjectDialog,
+              !frameLibrary.isImporting, !frameLibrary.isRemoving else { completion(nil); return }
+        let destination = sectionID ?? activeSection?.id
+        isBusy = true
+        error = nil
+        status = "Importing \(urls.count) screenshot(s)…"
+        // ImageIO uses default-priority workers internally. Await that work without
+        // blocking the user-interactive main thread or forcing eager decode in a view.
+        Task(priority: .medium) { @MainActor [self] in
+            let importedID: UUID?
+            do {
+                let batch = try await ScreenshotImportWorker.read(urls)
+                try Task.checkCancellation()
+                importedID = applyImportedImages(batch, asMockups: false, sectionID: destination)
+            } catch {
+                self.error = error.localizedDescription
+                importedID = nil
+            }
+            isBusy = false
+            completion(importedID)
+        }
+    }
+
+    // Synchronous fixture setup for standalone checks; UI imports use the worker above.
+    // periphery:ignore
     func load(_ urls: [URL], asMockups: Bool, sectionID: UUID? = nil) {
+        var batch = ScreenshotImportBatch()
+        for url in urls {
+            do { batch.images.append(try ImportedImage(url: url)) }
+            catch { batch.failures.append(error.localizedDescription) }
+        }
+        applyImportedImages(batch, asMockups: asMockups, sectionID: sectionID)
+    }
+
+    @discardableResult
+    private func applyImportedImages(_ batch: ScreenshotImportBatch, asMockups: Bool, sectionID: UUID? = nil) -> UUID? {
         if !asMockups { beginEditing("Import Screenshots") }
         defer { if !asMockups { endEditing() } }
         var destination = sectionID ?? activeSection?.id
         let matchInitialCanvas = destination == nil
-        var failures: [String] = []
-        for url in urls {
+        var failures = batch.failures
+        var importedCount = 0
+        var lastImportedID: UUID?
+        for imported in batch.images {
             do {
-                let imported = try ImportedImage(url: url)
                 if asMockups {
                     try frameLibrary.store(imported)
                 } else {
@@ -968,10 +1005,13 @@ final class EditorModel {
                         }
                     }
                 }
+                importedCount += 1
+                lastImportedID = imported.id
             } catch { failures.append(error.localizedDescription) }
         }
-        status = "Imported \(urls.count - failures.count) image(s)."
+        status = "Imported \(importedCount) image(s)."
         if !failures.isEmpty { error = failures.joined(separator: "\n") }
+        return lastImportedID
     }
 
     var manualCalibrationEnabled: Bool {
