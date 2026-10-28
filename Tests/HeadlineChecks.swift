@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 
 @main
 struct HeadlineChecks {
@@ -25,6 +26,20 @@ struct HeadlineChecks {
         let half = HeadlineRenderer.layout(headline, canvas: CGSize(width: 400, height: 800))!
         precondition(abs(half.rect.midX * 2 - layout.rect.midX) < 0.01 && abs(half.rect.height * 2 - layout.rect.height) < 0.01,
                      "Preview and export text geometry must scale consistently")
+        // The browser and export must resolve the same font, including the selected weight.
+        for family in ["", "Helvetica"] {
+            for weight in HeadlineWeight.allCases {
+                var sample = headline
+                sample.fontFamily = family; sample.weight = weight
+                let rendered = HeadlineRenderer.layout(sample, canvas: canvas)!
+                let previewFont = HeadlineRenderer.font(family: family, weight: weight,
+                                                        size: canvas.width * sample.size)
+                let previewLine = CTLineCreateWithAttributedString(NSAttributedString(
+                    string: sample.firstLine, attributes: [.font: previewFont]))
+                precondition(abs(CTLineGetTypographicBounds(previewLine, nil, nil, nil) - rendered.widths[0]) < 0.01,
+                             "Font browser and exported headline measurements must match")
+            }
+        }
         headline.x = 0; headline.y = 1
         let clamped = HeadlineRenderer.layout(headline, canvas: canvas)!
         precondition(clamped.rect.minX >= 0 && clamped.rect.maxY <= canvas.height)

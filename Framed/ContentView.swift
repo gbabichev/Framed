@@ -1471,15 +1471,12 @@ private extension HeadlineSettings {
     }
 }
 
-private enum HeadlineFontCatalog {
-    static let families = NSFontManager.shared.availableFontFamilies.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-}
-
 private struct HeadlineSettingsView: View {
     @Environment(EditorModel.self) private var editor
     @Binding var settings: CompositionSettings
     var showsPosition = true
     var styleEditable = true
+    @State private var showsFontBrowser = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1513,12 +1510,19 @@ private struct HeadlineSettingsView: View {
                     Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
                         GridRow {
                             Text("Font").font(.subheadline.weight(.semibold))
-                            Picker("Font", selection: $settings.headline.fontFamily) {
-                                Text("System").tag("")
-                                ForEach(HeadlineFontCatalog.families, id: \.self) { Text($0).tag($0) }
+                            Button { showsFontBrowser = true } label: {
+                                HStack {
+                                    Text(settings.headline.fontFamily.isEmpty ? "System" : settings.headline.fontFamily)
+                                        .lineLimit(1).truncationMode(.middle)
+                                    Spacer(minLength: 6)
+                                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
                             }
-                            .labelsHidden()
-                            .frame(maxWidth: .infinity)
+                            .buttonStyle(.bordered)
+                            .help("Browse fonts with your headline text")
+                            .accessibilityLabel("Choose headline font")
                         }
                         GridRow {
                             Text("Weight").font(.subheadline.weight(.semibold))
@@ -1564,6 +1568,14 @@ private struct HeadlineSettingsView: View {
                     .help("Reset headline to the top center")
                     InspectorInfo(text: "Drag the headline in the preview to position it. Reset returns it to the top center of the canvas. Center guides and snapping also apply to the headline.")
                 }
+            }
+        }
+        .sheet(isPresented: $showsFontBrowser) {
+            HeadlineFontBrowser(headline: settings.headline) { family in
+                guard styleEditable else { return }
+                editor.beginEditing("Change Headline Font")
+                settings.headline.fontFamily = family
+                editor.endEditing()
             }
         }
     }

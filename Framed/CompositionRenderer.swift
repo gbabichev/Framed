@@ -321,21 +321,26 @@ nonisolated struct HeadlineLayout {
 }
 
 nonisolated enum HeadlineRenderer {
+    /// Shared by export and the font browser so family and weight resolve identically.
+    static func font(family: String, weight: HeadlineWeight, size: CGFloat) -> NSFont {
+        guard !family.isEmpty else { return .systemFont(ofSize: size, weight: weight.value) }
+        let descriptor = NSFontDescriptor(fontAttributes: [
+            .family: family,
+            .traits: [NSFontDescriptor.TraitKey.weight: weight.value.rawValue]
+        ])
+        return NSFont(descriptor: descriptor, size: size) ?? .systemFont(ofSize: size, weight: weight.value)
+    }
+
     static func layout(_ headline: HeadlineSettings, canvas: CGSize) -> HeadlineLayout? {
         guard headline.enabled else { return nil }
         let text = [(headline.firstLine, CGFloat(1)), (headline.secondLine, CGFloat(0.75))]
             .filter { !$0.0.trimmingCharacters(in: .whitespaces).isEmpty }
         guard !text.isEmpty else { return nil }
         let fontSize = canvas.width * headline.size
-        let descriptor = NSFontDescriptor(fontAttributes: [
-            .family: headline.fontFamily,
-            .traits: [NSFontDescriptor.TraitKey.weight: headline.weight.value.rawValue]
-        ])
         let maxWidth = canvas.width * 0.9
         let lines = text.map { value, relativeSize -> CTLine in
             let size = fontSize * relativeSize
-            let font = headline.fontFamily.isEmpty ? NSFont.systemFont(ofSize: size, weight: headline.weight.value)
-                : NSFont(descriptor: descriptor, size: size) ?? NSFont.systemFont(ofSize: size, weight: headline.weight.value)
+            let font = font(family: headline.fontFamily, weight: headline.weight, size: size)
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: headline.color]
             let token = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: attributes))
             let line = CTLineCreateWithAttributedString(NSAttributedString(string: value, attributes: attributes))
